@@ -8,15 +8,10 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	otelv1alpha1 "github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
-	loggingv1 "github.com/openshift/cluster-logging-operator/api/observability/v1"
-	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
 	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
-	uiplugin "github.com/rhobs/observability-operator/pkg/apis/uiplugin/v1alpha1"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon/common"
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	mconfig "github.com/stolostron/multicluster-observability-addon/internal/metrics/config"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"open-cluster-management.io/addon-framework/pkg/agent"
 	"open-cluster-management.io/addon-framework/pkg/utils"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
@@ -38,11 +33,7 @@ var (
 	errUnknownProbeKey            = errors.New("probe has key that doesn't match the key defined")
 	errInvalidVersionString       = errors.New("invalid version string")
 
-	prometheusAgentCRDName = fmt.Sprintf("%s.%s", cooprometheusv1alpha1.PrometheusAgentName, cooprometheusv1alpha1.SchemeGroupVersion.Group)
-	scrapeConfigCRDName    = fmt.Sprintf("%s.%s", cooprometheusv1alpha1.ScrapeConfigName, cooprometheusv1alpha1.SchemeGroupVersion.Group)
-	serviceMonitorCRDName  = fmt.Sprintf("%s.%s", cooprometheusv1.ServiceMonitorName, cooprometheusv1.SchemeGroupVersion.Group)
-	podMonitorCRDName      = fmt.Sprintf("%s.%s", cooprometheusv1.PodMonitorName, cooprometheusv1.SchemeGroupVersion.Group)
-	probeCRDName           = fmt.Sprintf("%s.%s", cooprometheusv1.ProbeName, cooprometheusv1.SchemeGroupVersion.Group)
+	scrapeConfigCRDName = fmt.Sprintf("%s.%s", cooprometheusv1alpha1.ScrapeConfigName, cooprometheusv1alpha1.SchemeGroupVersion.Group)
 )
 
 func NewRegistrationOption(agentName string) *agent.RegistrationOption {
@@ -53,205 +44,25 @@ func NewRegistrationOption(agentName string) *agent.RegistrationOption {
 }
 
 func HealthProber(k8s client.Client, logger logr.Logger) *agent.HealthProber {
-	probeFields := []agent.ProbeField{}
-	probeFields = append(probeFields, getMetricsProbeFields()...)
-	probeFields = append(probeFields, getLogsProbeFields()...)
-	probeFields = append(probeFields, getTracesProbeFields()...)
-	probeFields = append(probeFields, getAnalyticsProbeFields()...)
+	// ProbeFields are kept minimal: only include resources that are guaranteed
+	// to be present in every ManifestWork. The klusterlet-agent silently
+	// rejects ManifestWorks whose manifestConfigs reference resources not in
+	// the payload. Since metrics, logging, and tracing resources are
+	// conditionally rendered (depending on ADC configuration), their probe
+	// fields must NOT be registered statically here.
+	//
+	// The HealthChecker function already handles conditional checks: it reads
+	// the current options and skips checks for disabled subsystems.
 	return &agent.HealthProber{
 		Type: agent.HealthProberTypeWork,
 		WorkProber: &agent.WorkHealthProber{
-			ProbeFields: probeFields,
+			ProbeFields: []agent.ProbeField{},
 			HealthChecker: func(fields []agent.FieldResult, mc *v1.ManagedCluster, mcao *addonapiv1alpha1.ManagedClusterAddOn) error {
 				if err := healthChecker(k8s, fields, mc, mcao); err != nil {
 					logger.V(1).Info("Health check failed for managed cluster", "clusterName", mc.Name, "error", err.Error())
 					return fmt.Errorf("healthChecker failed: %w", err)
 				}
 				return nil
-			},
-		},
-	}
-}
-
-func getMetricsProbeFields() []agent.ProbeField {
-	return []agent.ProbeField{
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:     cooprometheusv1alpha1.SchemeGroupVersion.Group,
-				Resource:  cooprometheusv1alpha1.PrometheusAgentName,
-				Name:      mconfig.PlatformMetricsCollectorApp,
-				Namespace: "*", // Use wildcard to support custom installation namespaces. This works as long as these resources have unique names
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.PaProbeKey,
-							Path: addoncfg.PaProbePath,
-						},
-					},
-				},
-			},
-		},
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:     cooprometheusv1alpha1.SchemeGroupVersion.Group,
-				Resource:  cooprometheusv1alpha1.PrometheusAgentName,
-				Name:      mconfig.UserWorkloadMetricsCollectorApp,
-				Namespace: "*", // Use wildcard to support custom installation namespaces. This works as long as these resources have unique names
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.PaProbeKey,
-							Path: addoncfg.PaProbePath,
-						},
-					},
-				},
-			},
-		},
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:    apiextensionsv1.GroupName,
-				Resource: crdResourceName,
-				Name:     scrapeConfigCRDName,
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.PrometheusOperatorVersionFeedbackName,
-							Path: addoncfg.PrometheusOperatorVersionFeedbackPath,
-						},
-						{
-							Name: addoncfg.IsEstablishedFeedbackName,
-							Path: addoncfg.IsEstablishedFeedbackPath,
-						},
-						{
-							Name: addoncfg.LastTransitionTimeFeedbackName,
-							Path: addoncfg.LastTransitionTimeFeedbackPath,
-						},
-						{
-							Name: addoncfg.IsOLMManagedFeedbackName,
-							Path: addoncfg.IsOLMManagedFeedbackPath,
-						},
-					},
-				},
-			},
-		},
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:    apiextensionsv1.GroupName,
-				Resource: crdResourceName,
-				Name:     prometheusAgentCRDName,
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.IsEstablishedFeedbackName, // needed for generating the sync annotation on the prometheus operator
-							Path: addoncfg.IsEstablishedFeedbackPath,
-						},
-						{
-							Name: addoncfg.LastTransitionTimeFeedbackName,
-							Path: addoncfg.LastTransitionTimeFeedbackPath,
-						},
-					},
-				},
-			},
-		},
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:    apiextensionsv1.GroupName,
-				Resource: crdResourceName,
-				Name:     mconfig.MonitoringStackCRDName,
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.IsOLMManagedFeedbackName,
-							Path: addoncfg.IsOLMManagedFeedbackPath,
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-func getLogsProbeFields() []agent.ProbeField {
-	return []agent.ProbeField{
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:     loggingv1.GroupVersion.Group,
-				Resource:  addoncfg.ClusterLogForwardersResource,
-				Name:      addoncfg.SpokeCLFName,
-				Namespace: addoncfg.SpokeCLFNamespace,
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.ClfProbeKey,
-							Path: addoncfg.ClfProbePath,
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-func getTracesProbeFields() []agent.ProbeField {
-	return []agent.ProbeField{
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:     otelv1alpha1.GroupVersion.Group,
-				Resource:  addoncfg.OpenTelemetryCollectorsResource,
-				Name:      addoncfg.SpokeOTELColName,
-				Namespace: addoncfg.SpokeOTELColNamespace,
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.OtelColProbeKey,
-							Path: addoncfg.OtelColProbePath,
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-func getAnalyticsProbeFields() []agent.ProbeField {
-	return []agent.ProbeField{
-		{
-			ResourceIdentifier: workv1.ResourceIdentifier{
-				Group:    uiplugin.GroupVersion.Group,
-				Resource: addoncfg.UiPluginsResource,
-				Name:     "monitoring",
-			},
-			ProbeRules: []workv1.FeedbackRule{
-				{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{
-						{
-							Name: addoncfg.UipProbeKey,
-							Path: addoncfg.UipProbePath,
-						},
-					},
-				},
 			},
 		},
 	}
@@ -329,8 +140,10 @@ func Updaters() []agent.Updater {
 }
 
 func healthChecker(k8s client.Client, fields []agent.FieldResult, mc *v1.ManagedCluster, mcao *addonapiv1alpha1.ManagedClusterAddOn) error {
+	// ProbeFields is empty so no feedback will be returned by the work agent.
+	// Treat an empty fields slice as healthy.
 	if len(fields) == 0 {
-		return errMissingFields
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), addoncfg.DefaultContextTimeout)
