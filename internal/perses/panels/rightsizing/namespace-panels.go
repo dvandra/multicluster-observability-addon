@@ -24,7 +24,6 @@ func nsTblCol(name, header string, align tablePanel.Align, format *commonSdk.For
 			Format:        format,
 			EnableSorting: true,
 		},
-		EnableFiltering: true,
 	}
 	for _, fn := range opts {
 		fn(&c)
@@ -233,6 +232,7 @@ func CPUQuotaTablePanel(datasourceName string) panelgroup.Option {
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(
 			query.PromQL(
@@ -292,6 +292,7 @@ func MemQuotaTablePanel(datasourceName string) panelgroup.Option {
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(
 			query.PromQL(

@@ -14,6 +14,7 @@ import (
 	listVar "github.com/perses/perses/go-sdk/variable/list-variable"
 	labelValuesVar "github.com/perses/plugins/prometheus/sdk/go/variable/label-values"
 	staticListVar "github.com/perses/plugins/staticlistvariable/sdk/go"
+	acmHelpers "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm"
 	panels "github.com/stolostron/multicluster-observability-addon/internal/perses/panels/rightsizing"
 )
 
@@ -101,13 +102,12 @@ func BuildVMUnderestimation(project string, datasource string, clusterLabelName 
 			),
 		),
 
-		dashboard.AddPanelGroup("Navigation",
-			panelgroup.PanelsPerLine(1),
-			panelgroup.PanelHeight(1),
+		acmHelpers.AddCustomPanelGroup("",
+			[]acmHelpers.GridItem{{X: 17, Y: 0, W: 7, H: 2}},
 			panels.VMBackToMainDashboardPanel(datasource, project),
 		),
 
-		dashboard.AddPanelGroup("CPU Analysis",
+		dashboard.AddPanelGroup("",
 			panelgroup.PanelsPerLine(4),
 			panelgroup.PanelHeight(3),
 			panels.VMCPUUnderestimationStatPanel(datasource),
@@ -116,13 +116,13 @@ func BuildVMUnderestimation(project string, datasource string, clusterLabelName 
 			panels.VMCPUUtilizationStatPanel(datasource),
 		),
 
-		dashboard.AddPanelGroup("CPU Utilization Over Time",
+		dashboard.AddPanelGroup("",
 			panelgroup.PanelsPerLine(1),
 			panelgroup.PanelHeight(12),
 			panels.VMCPUUtilizationTimeSeriesPanel(datasource),
 		),
 
-		dashboard.AddPanelGroup("Memory Analysis",
+		dashboard.AddPanelGroup("",
 			panelgroup.PanelsPerLine(4),
 			panelgroup.PanelHeight(3),
 			panels.VMMemoryUnderestimationStatPanel(datasource),
@@ -131,7 +131,7 @@ func BuildVMUnderestimation(project string, datasource string, clusterLabelName 
 			panels.VMMemoryUtilizationStatPanel(datasource),
 		),
 
-		dashboard.AddPanelGroup("Memory Utilization Over Time",
+		dashboard.AddPanelGroup("",
 			panelgroup.PanelsPerLine(1),
 			panelgroup.PanelHeight(12),
 			panels.VMMemoryUtilizationTimeSeriesPanel(datasource),

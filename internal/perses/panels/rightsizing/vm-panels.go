@@ -9,6 +9,7 @@ import (
 
 	"github.com/perses/community-mixins/pkg/dashboards"
 	commonSdk "github.com/perses/perses/go-sdk/common"
+	"github.com/perses/perses/go-sdk/link"
 	"github.com/perses/perses/go-sdk/panel"
 	panelgroup "github.com/perses/perses/go-sdk/panel-group"
 	markdownPanel "github.com/perses/plugins/markdown/sdk/go"
@@ -30,15 +31,13 @@ func vmDataLink(project, targetDashboard, title string) *DataLink {
 
 var overestRedThreshold = &commonSdk.Thresholds{
 	Steps: []commonSdk.StepOption{
-		{Value: 0, Color: "dark-green"},
-		{Value: 0, Color: "semi-dark-red"},
+		{Value: 0, Color: "#ff0000"},
 	},
 }
 
 var underestYellowThreshold = &commonSdk.Thresholds{
 	Steps: []commonSdk.StepOption{
-		{Value: 0, Color: "#535353"},
-		{Value: 0, Color: "semi-dark-yellow"},
+		{Value: 0, Color: "#faff06"},
 	},
 }
 
@@ -121,33 +120,33 @@ func VMCPUOverestimationTablePanel(datasourceName string, project string) panelg
 			ColumnSettings: []ColumnSettingsWithLink{
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "timestamp", Hide: true, EnableSorting: true}},
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "name_namespace", Hide: true}},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: overestLink, EnableFiltering: true},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: overestLink, EnableFiltering: true},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: overestLink},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: overestLink},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #1", Header: "CPU Utilization %", HeaderDescription: "Ratio of CPU usage to CPU request as a percentage",
 					EnableSorting: true, Sort: tablePanel.AscSort,
 					Format: &commonSdk.Format{Unit: &dashboards.PercentDecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #2", Header: "CPU Usage", HeaderDescription: "Actual CPU cores consumed by the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #3", Header: "CPU Request", HeaderDescription: "CPU cores requested/allocated for the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #4", Header: "CPU Recommendation", HeaderDescription: "Recommended CPU cores based on usage profile",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 0},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #5", Header: "CPU Overestimation", HeaderDescription: "Excess CPU cores allocated beyond recommendation (Request - Recommendation)",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 0},
-				}, EnableFiltering: true},
+				}},
 			},
 			CellSettings: []tablePanel.CellSettings{
 				{Condition: tablePanel.Condition{Kind: tablePanel.MiscConditionKind, Spec: &tablePanel.MiscConditionSpec{Value: tablePanel.NullValue}}, Text: "N/A"},
@@ -155,6 +154,7 @@ func VMCPUOverestimationTablePanel(datasourceName string, project string) panelg
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (`+"\n"+`        max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]) / max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_request{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])`+"\n"+`    ) > 0,`+"\n"+`  "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
@@ -173,33 +173,33 @@ func VMCPUUnderestimationTablePanel(datasourceName string, project string) panel
 			ColumnSettings: []ColumnSettingsWithLink{
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "timestamp", Hide: true, EnableSorting: true}},
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "name_namespace", Hide: true}},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: underestLink, EnableFiltering: true},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: underestLink, EnableFiltering: true},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: underestLink},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: underestLink},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #1", Header: "CPU Utilization %", HeaderDescription: "Ratio of CPU usage to CPU request as a percentage",
 					EnableSorting: true, Sort: tablePanel.DescSort,
 					Format: &commonSdk.Format{Unit: &dashboards.PercentDecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #2", Header: "CPU Usage", HeaderDescription: "Actual CPU cores consumed by the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #3", Header: "CPU Request", HeaderDescription: "CPU cores requested/allocated for the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #4", Header: "CPU Recommendation", HeaderDescription: "Recommended CPU cores based on usage profile",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 0},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #5", Header: "CPU Underestimation", HeaderDescription: "Deficit of CPU cores below recommendation (Recommendation - Request)",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.DecimalUnit, DecimalPlaces: 0},
-				}, EnableFiltering: true},
+				}},
 			},
 			CellSettings: []tablePanel.CellSettings{
 				{Condition: tablePanel.Condition{Kind: tablePanel.MiscConditionKind, Spec: &tablePanel.MiscConditionSpec{Value: tablePanel.NullValue}}, Text: "N/A"},
@@ -207,6 +207,7 @@ func VMCPUUnderestimationTablePanel(datasourceName string, project string) panel
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (`+"\n"+`        max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]) / max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_request{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])`+"\n"+`    ) > 0,`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:cpu_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
@@ -225,33 +226,33 @@ func VMMemOverestimationTablePanel(datasourceName string, project string) panelg
 			ColumnSettings: []ColumnSettingsWithLink{
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "timestamp", Hide: true, EnableSorting: true}},
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "name_namespace", Hide: true}},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: overestLink, EnableFiltering: true},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: overestLink, EnableFiltering: true},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: overestLink},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: overestLink},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #1", Header: "Memory Utilization %", HeaderDescription: "Ratio of memory usage to memory request as a percentage",
 					EnableSorting: true, Sort: tablePanel.AscSort,
 					Format: &commonSdk.Format{Unit: &dashboards.PercentDecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #2", Header: "Memory Usage", HeaderDescription: "Actual memory consumed by the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #3", Header: "Memory Request", HeaderDescription: "Memory requested/allocated for the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #4", Header: "Memory Recommendation", HeaderDescription: "Recommended memory allocation based on usage profile",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #5", Header: "Memory Overestimation", HeaderDescription: "Excess memory allocated beyond recommendation (Request - Recommendation)",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 			},
 			CellSettings: []tablePanel.CellSettings{
 				{Condition: tablePanel.Condition{Kind: tablePanel.MiscConditionKind, Spec: &tablePanel.MiscConditionSpec{Value: tablePanel.NullValue}}, Text: "N/A"},
@@ -259,6 +260,7 @@ func VMMemOverestimationTablePanel(datasourceName string, project string) panelg
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]) / max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_request{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
@@ -277,33 +279,33 @@ func VMMemUnderestimationTablePanel(datasourceName string, project string) panel
 			ColumnSettings: []ColumnSettingsWithLink{
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "timestamp", Hide: true, EnableSorting: true}},
 				{ColumnSettings: tablePanel.ColumnSettings{Name: "name_namespace", Hide: true}},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: underestLink, EnableFiltering: true},
-				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: underestLink, EnableFiltering: true},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "name", Header: "VM Name", HeaderDescription: "Name of the Virtual Machine", EnableSorting: true}, DataLink: underestLink},
+				{ColumnSettings: tablePanel.ColumnSettings{Name: "namespace", Header: "Namespace", HeaderDescription: "Kubernetes namespace where the VM is deployed", EnableSorting: true}, DataLink: underestLink},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #1", Header: "Memory Utilization %", HeaderDescription: "Ratio of memory usage to memory request as a percentage",
 					EnableSorting: true, Sort: tablePanel.DescSort,
 					Format: &commonSdk.Format{Unit: &dashboards.PercentDecimalUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #2", Header: "Memory Usage", HeaderDescription: "Actual memory consumed by the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #3", Header: "Memory Request", HeaderDescription: "Memory requested/allocated for the VM",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #4", Header: "Memory Recommendation", HeaderDescription: "Recommended memory allocation based on usage profile",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 				{ColumnSettings: tablePanel.ColumnSettings{
 					Name: "value #5", Header: "Memory Underestimation", HeaderDescription: "Deficit of memory below recommendation (Recommendation - Request)",
 					EnableSorting: true,
 					Format: &commonSdk.Format{Unit: &dashboards.BytesUnit, DecimalPlaces: 2},
-				}, EnableFiltering: true},
+				}},
 			},
 			CellSettings: []tablePanel.CellSettings{
 				{Condition: tablePanel.Condition{Kind: tablePanel.MiscConditionKind, Spec: &tablePanel.MiscConditionSpec{Value: tablePanel.NullValue}}, Text: "N/A"},
@@ -311,6 +313,7 @@ func VMMemUnderestimationTablePanel(datasourceName string, project string) panel
 			Transforms: []commonSdk.Transform{
 				{Kind: commonSdk.MergeSeriesKind, Spec: commonSdk.MergeSeriesSpec{}},
 			},
+			EnableFiltering: true,
 		}),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:]) / max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_request{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
 		panel.AddQuery(query.PromQL(`label_join(`+"\n"+`    (max_over_time(sum by (name, namespace) (acm_rs_vm:namespace:memory_usage{cluster="$cluster", profile="$profile", namespace=~"$namespace"})[$days:])),`+"\n"+`    "name_namespace", "-", "name", "namespace"`+"\n"+`)`, dashboards.AddQueryDataSource(datasourceName))),
@@ -549,5 +552,9 @@ func VMBackToMainDashboardPanel(datasourceName string, project string) panelgrou
 	return panelgroup.AddPanel("Back to Main Dashboard",
 		panel.Description("Back to Main Dashboard"),
 		markdownPanel.Markdown(fmt.Sprintf("[Back to Main Dashboard](%s)", backURL)),
+		panel.AddLink(backURL,
+			link.Name("Back to Main Dashboard"),
+			link.Tooltip("Back to Main Dashboard"),
+		),
 	)
 }

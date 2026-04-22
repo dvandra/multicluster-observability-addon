@@ -18,7 +18,7 @@ import (
 )
 
 func withCPUStatsAndChart(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("CPU",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(4),
 		panelgroup.PanelHeight(5),
 		panels.CPURecommendationPanel(datasource),
@@ -29,7 +29,7 @@ func withCPUStatsAndChart(datasource string) dashboard.Option {
 }
 
 func withCPUTopNamespaces(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("CPU Utilization Top Namespaces",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(12),
 		panels.CPUTopNamespacesPanel(datasource),
@@ -37,7 +37,7 @@ func withCPUTopNamespaces(datasource string) dashboard.Option {
 }
 
 func withCPUQuotaTable(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("CPU Quota",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(9),
 		panels.CPUQuotaTablePanel(datasource),
@@ -45,7 +45,7 @@ func withCPUQuotaTable(datasource string) dashboard.Option {
 }
 
 func withMemStatsAndChart(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("Memory",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(4),
 		panelgroup.PanelHeight(5),
 		panels.MemRecommendationPanel(datasource),
@@ -56,7 +56,7 @@ func withMemStatsAndChart(datasource string) dashboard.Option {
 }
 
 func withMemTopNamespaces(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("Memory Utilization Top Namespaces",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(12),
 		panels.MemTopNamespacesPanel(datasource),
@@ -64,7 +64,7 @@ func withMemTopNamespaces(datasource string) dashboard.Option {
 }
 
 func withMemQuotaTable(datasource string) dashboard.Option {
-	return dashboard.AddPanelGroup("Memory Quota",
+	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(9),
 		panels.MemQuotaTablePanel(datasource),

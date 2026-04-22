@@ -56,20 +56,19 @@ type DataLink struct {
 	URL        string `json:"url"`
 }
 
-// ColumnSettingsWithLink extends the SDK ColumnSettings with an optional DataLink
-// and EnableFiltering (not yet exposed by the upstream Go SDK).
+// ColumnSettingsWithLink extends the SDK ColumnSettings with an optional DataLink.
 type ColumnSettingsWithLink struct {
 	tablePanel.ColumnSettings
-	DataLink        *DataLink `json:"dataLink,omitempty"`
-	EnableFiltering bool      `json:"enableFiltering,omitempty"`
+	DataLink *DataLink `json:"dataLink,omitempty"`
 }
 
 // TablePluginSpec mirrors the SDK's PluginSpec but uses ColumnSettingsWithLink.
 type TablePluginSpec struct {
-	Density        tablePanel.Density         `json:"density,omitempty"`
-	ColumnSettings []ColumnSettingsWithLink    `json:"columnSettings,omitempty"`
-	CellSettings   []tablePanel.CellSettings  `json:"cellSettings,omitempty"`
-	Transforms     []commonSdk.Transform      `json:"transforms,omitempty"`
+	Density         tablePanel.Density        `json:"density,omitempty"`
+	ColumnSettings  []ColumnSettingsWithLink   `json:"columnSettings,omitempty"`
+	CellSettings    []tablePanel.CellSettings `json:"cellSettings,omitempty"`
+	Transforms      []commonSdk.Transform     `json:"transforms,omitempty"`
+	EnableFiltering bool                      `json:"enableFiltering,omitempty"`
 }
 
 // TableWithLinks creates a panel.Option that builds a Table plugin spec
