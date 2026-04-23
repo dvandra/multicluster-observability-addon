@@ -166,7 +166,6 @@ recommendationPercentage: 120
 		assert.Equal(t, 0, result.PrometheusRuleConfig.RecommendationPercentage)
 		assert.Empty(t, result.PrometheusRuleConfig.NamespaceFilterCriteria.InclusionCriteria)
 		assert.Empty(t, result.PrometheusRuleConfig.NamespaceFilterCriteria.ExclusionCriteria)
-		assert.Equal(t, GetDefaultRSPlacement(), result.PlacementConfiguration)
 	})
 
 	t.Run("invalid yaml", func(t *testing.T) {

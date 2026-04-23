@@ -169,7 +169,7 @@ func (r *ResourceCreatorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	objs = append(objs, mDefaultConfig...)
 
 	// Reconcile right-sizing resources (hub-wide concern).
-	// Placement and ConfigMap resources are created/updated/deleted here, not per-cluster in handler.go,
+	// ConfigMap cleanup for disabled features is done here, not per-cluster in handler.go,
 	// to avoid race conditions from concurrent Build() calls.
 	rsBuilder := &rshandlers.OptionsBuilder{Client: r.Client, Logger: r.Log.WithName("rightsizing")}
 	if err := rsBuilder.ReconcileRSResources(ctx, opts); err != nil {
@@ -204,7 +204,7 @@ func (r *ResourceCreatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&cooprometheusv1alpha1.PrometheusAgent{}, r.enqueueForMCOAOwnedResources()).
 		Watches(&cooprometheusv1alpha1.ScrapeConfig{}, r.enqueueForMCOControlledResources(), partOfMCOAPredicate).
 		Watches(&prometheusv1.PrometheusRule{}, r.enqueueForMCOControlledResources(), partOfMCOAPredicate).
-		// Trigger reconciliations if right-sizing ConfigMaps change (for placement updates)
+		// Trigger reconciliations if right-sizing ConfigMaps change (user customizations)
 		Watches(&corev1.ConfigMap{}, r.enqueueAODC(), rsConfigMapPredicate).
 		Complete(r)
 }

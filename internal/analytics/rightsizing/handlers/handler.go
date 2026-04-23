@@ -40,12 +40,8 @@ func (o *OptionsBuilder) Build(ctx context.Context, cluster *clusterv1.ManagedCl
 		return ret, nil
 	}
 
-	namespaceEnabled := opts.Platform.AnalyticsOptions.RightSizing.NamespaceEnabled
-	virtualizationEnabled := opts.Platform.AnalyticsOptions.RightSizing.VirtualizationEnabled
-
 	// Build namespace right-sizing options
-	if namespaceEnabled {
-		// Ensure ConfigMap exists on hub (MCOA owns all RS resources)
+	if opts.Platform.AnalyticsOptions.RightSizing.NamespaceEnabled {
 		if err := o.ensureNamespaceConfigMap(ctx); err != nil {
 			o.Logger.Error(err, "Failed to ensure namespace ConfigMap exists, continuing with defaults")
 		}
@@ -54,36 +50,22 @@ func (o *OptionsBuilder) Build(ctx context.Context, cluster *clusterv1.ManagedCl
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				nsConfigData = rightsizing.RSConfigMapData{
-					PrometheusRuleConfig:   rightsizing.GetDefaultRSPrometheusRuleConfig(),
-					PlacementConfiguration: rightsizing.GetDefaultRSPlacement(),
+					PrometheusRuleConfig: rightsizing.GetDefaultRSPrometheusRuleConfig(),
 				}
 			} else {
 				return ret, fmt.Errorf("failed to get namespace config: %w", err)
 			}
 		}
 
-		// Check if this cluster is selected by the namespace Placement
-		// (Placement resource is created/updated by ResourceCreator)
-		nsSelected, err := o.isClusterSelectedByRSPlacement(ctx, rightsizing.NamespacePlacementName, cluster.Name)
+		nsOpts, err := o.buildNamespaceOptionsFromConfig(nsConfigData)
 		if err != nil {
-			o.Logger.Error(err, "Failed to check namespace placement selection, defaulting to selected")
-			nsSelected = true
+			return ret, fmt.Errorf("failed to build namespace right-sizing options: %w", err)
 		}
-
-		if nsSelected {
-			nsOpts, err := o.buildNamespaceOptionsFromConfig(nsConfigData)
-			if err != nil {
-				return ret, fmt.Errorf("failed to build namespace right-sizing options: %w", err)
-			}
-			ret.NamespaceRightSizing = nsOpts
-		} else {
-			o.Logger.V(1).Info("Cluster not selected for namespace right-sizing", "cluster", cluster.Name)
-		}
+		ret.NamespaceRightSizing = nsOpts
 	}
 
 	// Build virtualization right-sizing options
-	if virtualizationEnabled {
-		// Ensure ConfigMap exists on hub (MCOA owns all RS resources)
+	if opts.Platform.AnalyticsOptions.RightSizing.VirtualizationEnabled {
 		if err := o.ensureVirtualizationConfigMap(ctx); err != nil {
 			o.Logger.Error(err, "Failed to ensure virtualization ConfigMap exists, continuing with defaults")
 		}
@@ -92,30 +74,18 @@ func (o *OptionsBuilder) Build(ctx context.Context, cluster *clusterv1.ManagedCl
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				virtConfigData = rightsizing.RSConfigMapData{
-					PrometheusRuleConfig:   rightsizing.GetDefaultRSPrometheusRuleConfig(),
-					PlacementConfiguration: rightsizing.GetDefaultRSPlacement(),
+					PrometheusRuleConfig: rightsizing.GetDefaultRSPrometheusRuleConfig(),
 				}
 			} else {
 				return ret, fmt.Errorf("failed to get virtualization config: %w", err)
 			}
 		}
 
-		// Check if this cluster is selected by the virtualization Placement
-		virtSelected, err := o.isClusterSelectedByRSPlacement(ctx, rightsizing.VirtualizationPlacementName, cluster.Name)
+		virtOpts, err := o.buildVirtualizationOptionsFromConfig(virtConfigData)
 		if err != nil {
-			o.Logger.Error(err, "Failed to check virtualization placement selection, defaulting to selected")
-			virtSelected = true
+			return ret, fmt.Errorf("failed to build virtualization right-sizing options: %w", err)
 		}
-
-		if virtSelected {
-			virtOpts, err := o.buildVirtualizationOptionsFromConfig(virtConfigData)
-			if err != nil {
-				return ret, fmt.Errorf("failed to build virtualization right-sizing options: %w", err)
-			}
-			ret.VirtualizationRightSizing = virtOpts
-		} else {
-			o.Logger.V(1).Info("Cluster not selected for virtualization right-sizing", "cluster", cluster.Name)
-		}
+		ret.VirtualizationRightSizing = virtOpts
 	}
 
 	return ret, nil

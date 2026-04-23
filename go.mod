@@ -40,6 +40,7 @@ require (
 	github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring v0.83.0-rhobs1
 	github.com/rhobs/observability-operator/pkg/apis v0.0.0-20250902133632-f98bd8a20a80
 	golang.org/x/text v0.35.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -59,7 +60,6 @@ require (
 	github.com/hashicorp/go-version v1.8.0 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.51.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (

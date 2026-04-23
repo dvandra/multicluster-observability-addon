@@ -6,45 +6,21 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v2"
-	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 )
 
 var (
 	errMutuallyExclusiveNamespaceFilter = errors.New("only one of inclusion or exclusion criteria allowed for namespacefiltercriteria")
 	errMutuallyExclusiveLabelFilter     = errors.New("only one of inclusion or exclusion allowed for label_env")
 	errUnmarshalPrometheusRuleConfig    = errors.New("failed to unmarshal prometheusRuleConfig")
-	errUnmarshalPlacementConfig         = errors.New("failed to unmarshal placementConfiguration")
 )
 
 // FormatYAML converts a Go data structure to a YAML-formatted string.
-// Accepts RSPrometheusRuleConfig, Placement, or any YAML-serializable struct.
 func FormatYAML(data interface{}) string {
 	yamlData, err := yaml.Marshal(data)
 	if err != nil {
 		return ""
 	}
 	return string(yamlData)
-}
-
-// GetDefaultRSPlacement creates a default placement configuration for right-sizing.
-// Empty predicates + tolerations for unreachable/unavailable = selects ALL clusters.
-// Matches MCO's rs-utility/placement.go GetDefaultRSPlacement().
-func GetDefaultRSPlacement() clusterv1beta1.Placement {
-	return clusterv1beta1.Placement{
-		Spec: clusterv1beta1.PlacementSpec{
-			Predicates: []clusterv1beta1.ClusterPredicate{},
-			Tolerations: []clusterv1beta1.Toleration{
-				{
-					Key:      "cluster.open-cluster-management.io/unreachable",
-					Operator: clusterv1beta1.TolerationOpExists,
-				},
-				{
-					Key:      "cluster.open-cluster-management.io/unavailable",
-					Operator: clusterv1beta1.TolerationOpExists,
-				},
-			},
-		},
-	}
 }
 
 // GetDefaultRSPrometheusRuleConfig creates a default prometheus rule configuration for right-sizing
@@ -103,34 +79,21 @@ func ParseConfigMapData(data map[string]string) (RSConfigMapData, error) {
 		}
 	}
 
-	if placementYAML, ok := data["placementConfiguration"]; ok {
-		if err := yaml.Unmarshal([]byte(placementYAML), &configData.PlacementConfiguration); err != nil {
-			return configData, fmt.Errorf("%w: %w", errUnmarshalPlacementConfig, err)
-		}
-	} else {
-		// Default placement selects all clusters
-		configData.PlacementConfiguration = GetDefaultRSPlacement()
-	}
-
 	return configData, nil
 }
 
 // GetDefaultNamespaceConfigData returns default config data for namespace right-sizing
 func GetDefaultNamespaceConfigData() map[string]string {
 	ruleConfig := GetDefaultRSPrometheusRuleConfig()
-	placement := GetDefaultRSPlacement()
 	return map[string]string{
-		"prometheusRuleConfig":   FormatYAML(ruleConfig),
-		"placementConfiguration": FormatYAML(placement),
+		"prometheusRuleConfig": FormatYAML(ruleConfig),
 	}
 }
 
 // GetDefaultVirtualizationConfigData returns default config data for virtualization right-sizing
 func GetDefaultVirtualizationConfigData() map[string]string {
 	ruleConfig := GetDefaultRSPrometheusRuleConfig()
-	placement := GetDefaultRSPlacement()
 	return map[string]string{
-		"prometheusRuleConfig":   FormatYAML(ruleConfig),
-		"placementConfiguration": FormatYAML(placement),
+		"prometheusRuleConfig": FormatYAML(ruleConfig),
 	}
 }
