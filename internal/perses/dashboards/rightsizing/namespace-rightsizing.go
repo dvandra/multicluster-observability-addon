@@ -36,11 +36,11 @@ func withCPUTopNamespaces(datasource string) dashboard.Option {
 	)
 }
 
-func withCPUQuotaTable(datasource string, project string) dashboard.Option {
+func withCPUQuotaTable(datasource string, project string, linkToWorkload bool) dashboard.Option {
 	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(8),
-		panels.CPUQuotaTablePanel(datasource, project),
+		panels.CPUQuotaTablePanel(datasource, project, linkToWorkload),
 	)
 }
 
@@ -63,16 +63,18 @@ func withMemTopNamespaces(datasource string) dashboard.Option {
 	)
 }
 
-func withMemQuotaTable(datasource string, project string) dashboard.Option {
+func withMemQuotaTable(datasource string, project string, linkToWorkload bool) dashboard.Option {
 	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(8),
-		panels.MemQuotaTablePanel(datasource, project),
+		panels.MemQuotaTablePanel(datasource, project, linkToWorkload),
 	)
 }
 
-// BuildNamespaceRightSizing creates the namespace right-sizing dashboard
-func BuildNamespaceRightSizing(project string, datasource string, clusterLabelName string) (dashboard.Builder, error) {
+// BuildNamespaceRightSizing creates the namespace right-sizing dashboard.
+// When workloadPodEnabled is true, the namespace table columns include
+// drill-down links to the workload-pod overview dashboard.
+func BuildNamespaceRightSizing(project string, datasource string, clusterLabelName string, workloadPodEnabled bool) (dashboard.Builder, error) {
 	return dashboard.New("acm-rs-namespace-overview",
 		dashboard.ProjectName(project),
 		dashboard.Name("ACM Right-Sizing Namespace"),
@@ -126,9 +128,9 @@ func BuildNamespaceRightSizing(project string, datasource string, clusterLabelNa
 
 		withCPUStatsAndChart(datasource),
 		withCPUTopNamespaces(datasource),
-		withCPUQuotaTable(datasource, project),
+		withCPUQuotaTable(datasource, project, workloadPodEnabled),
 		withMemStatsAndChart(datasource),
 		withMemTopNamespaces(datasource),
-		withMemQuotaTable(datasource, project),
+		withMemQuotaTable(datasource, project, workloadPodEnabled),
 	)
 }
