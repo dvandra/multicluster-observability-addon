@@ -36,11 +36,11 @@ func withCPUTopNamespaces(datasource string) dashboard.Option {
 	)
 }
 
-func withCPUQuotaTable(datasource string) dashboard.Option {
+func withCPUQuotaTable(datasource string, project string) dashboard.Option {
 	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(8),
-		panels.CPUQuotaTablePanel(datasource),
+		panels.CPUQuotaTablePanel(datasource, project),
 	)
 }
 
@@ -63,11 +63,11 @@ func withMemTopNamespaces(datasource string) dashboard.Option {
 	)
 }
 
-func withMemQuotaTable(datasource string) dashboard.Option {
+func withMemQuotaTable(datasource string, project string) dashboard.Option {
 	return dashboard.AddPanelGroup("",
 		panelgroup.PanelsPerLine(1),
 		panelgroup.PanelHeight(8),
-		panels.MemQuotaTablePanel(datasource),
+		panels.MemQuotaTablePanel(datasource, project),
 	)
 }
 
@@ -126,9 +126,9 @@ func BuildNamespaceRightSizing(project string, datasource string, clusterLabelNa
 
 		withCPUStatsAndChart(datasource),
 		withCPUTopNamespaces(datasource),
-		withCPUQuotaTable(datasource),
+		withCPUQuotaTable(datasource, project),
 		withMemStatsAndChart(datasource),
 		withMemTopNamespaces(datasource),
-		withMemQuotaTable(datasource),
+		withMemQuotaTable(datasource, project),
 	)
 }
