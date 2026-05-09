@@ -36,6 +36,11 @@ const (
 	WorkloadPrometheusRuleName = "acm-rs-workload-prometheus-rules"
 	WorkloadConfigMapName      = "rs-workload-config"
 	WorkloadPlacementCMName    = "rs-workload-placement"
+
+	// GPU right-sizing constants
+	GPUPrometheusRuleName = "acm-rs-gpu-prometheus-rules"
+	GPUConfigMapName      = "rs-gpu-config"
+	GPUPlacementCMName    = "rs-gpu-placement"
 )
 
 // RSLabelFilter represents label filtering criteria for right-sizing
