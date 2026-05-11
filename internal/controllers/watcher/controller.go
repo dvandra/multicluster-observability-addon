@@ -292,7 +292,7 @@ func isRSPlacementConfigMap(namespace, name string) bool {
 	if namespace != addoncfg.InstallNamespace {
 		return false
 	}
-	return name == rightsizing.NamespacePlacementCMName || name == rightsizing.VirtualizationPlacementCMName || name == rightsizing.WorkloadPlacementCMName || name == rightsizing.GPUPlacementCMName
+	return name == rightsizing.VirtualizationPlacementCMName || name == rightsizing.WorkloadPlacementCMName || name == rightsizing.GPUPlacementCMName
 }
 
 var imagesConfigMapPredicate = predicate.Funcs{
