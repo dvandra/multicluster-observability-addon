@@ -25,7 +25,6 @@ const (
 	// Namespace right-sizing constants
 	NamespacePrometheusRuleName = "acm-rs-namespace-prometheus-rules"
 	NamespaceConfigMapName      = "rs-namespace-config"
-	NamespacePlacementCMName    = "rs-namespace-placement"
 
 	// Virtualization right-sizing constants
 	VirtualizationPrometheusRuleName = "acm-rs-virt-prometheus-rules"
