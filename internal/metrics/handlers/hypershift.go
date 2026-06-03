@@ -10,12 +10,12 @@ import (
 	"github.com/go-logr/logr"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusalpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
+	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	"github.com/stolostron/multicluster-observability-addon/internal/metrics/config"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,12 +31,12 @@ type clusterIdentity struct {
 
 type HypershiftResources struct {
 	ServiceMonitors []*prometheusv1.ServiceMonitor
-	ScrapeConfigs   []*prometheusalpha1.ScrapeConfig
+	ScrapeConfigs   []*cooprometheusv1alpha1.ScrapeConfig
 	Rules           []*prometheusv1.PrometheusRule
 }
 
 type CollectionConfig struct {
-	ScrapeConfigs []*prometheusalpha1.ScrapeConfig
+	ScrapeConfigs []*cooprometheusv1alpha1.ScrapeConfig
 	Rules         []*prometheusv1.PrometheusRule
 }
 
@@ -59,21 +59,21 @@ func (h *Hypershift) GenerateResources(ctx context.Context, etcdConfig, apiServe
 	}
 
 	// Keep only metrics from our own serviceMonitors to avoid collecting metrics from original serviceMonitor that would end up being incorrectly labeled.
-	scrapeConfigsMetricsFilter := []prometheusv1.RelabelConfig{
+	scrapeConfigsMetricsFilter := []cooprometheusv1.RelabelConfig{
 		{
-			SourceLabels: []prometheusv1.LabelName{config.ClusterIDMetricLabel}, // ClusterID is not empty (the hosted cluster one)
+			SourceLabels: []cooprometheusv1.LabelName{config.ClusterIDMetricLabel}, // ClusterID is not empty (the hosted cluster one)
 			Regex:        ".+",
 			Action:       "keep",
 		},
 		{
-			SourceLabels: []prometheusv1.LabelName{config.ManagementClusterIDMetricLabel}, // Management cluster is the current ManagedCluster
-			Regex:        h.ManagedCluster.Labels[addoncfg.ManagedClusterLabelClusterID],
+			SourceLabels: []cooprometheusv1.LabelName{config.ManagementClusterIDMetricLabel}, // Management cluster is the current ManagedCluster
+			Regex:        h.ManagedCluster.Labels[config.ManagedClusterLabelClusterID],
 			Action:       "keep",
 		},
 	}
 
 	for _, cfg := range etcdConfig.ScrapeConfigs {
-		cfg.Spec.RelabelConfigs = append(cfg.Spec.RelabelConfigs, scrapeConfigsMetricsFilter...)
+		cfg.Spec.MetricRelabelConfigs = append(cfg.Spec.MetricRelabelConfigs, scrapeConfigsMetricsFilter...)
 	}
 
 	ret.ScrapeConfigs = append(ret.ScrapeConfigs, etcdConfig.ScrapeConfigs...)
@@ -85,7 +85,7 @@ func (h *Hypershift) GenerateResources(ctx context.Context, etcdConfig, apiServe
 	}
 
 	for _, cfg := range apiServerConfig.ScrapeConfigs {
-		cfg.Spec.RelabelConfigs = append(cfg.Spec.RelabelConfigs, scrapeConfigsMetricsFilter...)
+		cfg.Spec.MetricRelabelConfigs = append(cfg.Spec.MetricRelabelConfigs, scrapeConfigsMetricsFilter...)
 	}
 
 	ret.ScrapeConfigs = append(ret.ScrapeConfigs, apiServerConfig.ScrapeConfigs...)
@@ -93,7 +93,7 @@ func (h *Hypershift) GenerateResources(ctx context.Context, etcdConfig, apiServe
 
 	apiserverMetrics, err := h.extractDependentMetrics(apiServerConfig.ScrapeConfigs, apiServerConfig.Rules)
 	if err != nil {
-		return ret, fmt.Errorf("failed to extract etcd dependent metrics: %w", err)
+		return ret, fmt.Errorf("failed to extract api server dependent metrics: %w", err)
 	}
 
 	ret.ServiceMonitors = make([]*prometheusv1.ServiceMonitor, 0, len(hostedClusters.Items))
@@ -119,7 +119,7 @@ func (h *Hypershift) GenerateResources(ctx context.Context, etcdConfig, apiServe
 
 		acmApiserverSm, err := h.generateApiServerServiceMonitor(ctx, namespace, hostedClusterIdentity, apiserverMetrics)
 		if err != nil {
-			return ret, fmt.Errorf("failed to generate etcd ServiceMonitor for namespace %s: %w", namespace, err)
+			return ret, fmt.Errorf("failed to generate api server ServiceMonitor for namespace %s: %w", namespace, err)
 		}
 		if acmApiserverSm != nil {
 			ret.ServiceMonitors = append(ret.ServiceMonitors, acmApiserverSm)
@@ -163,7 +163,6 @@ func (h *Hypershift) generateEtcdServiceMonitor(ctx context.Context, namespace s
 			Scheme:               endpoint.Scheme,
 			Port:                 endpoint.Port,
 			TargetPort:           endpoint.TargetPort,
-			BearerTokenSecret:    &corev1.SecretKeySelector{},
 			TLSConfig:            endpoint.TLSConfig,
 			MetricRelabelConfigs: h.generateMetricsRelabelConfigs(hostedCluster, metrics),
 			RelabelConfigs: []prometheusv1.RelabelConfig{
@@ -190,7 +189,7 @@ func (h *Hypershift) generateApiServerServiceMonitor(ctx context.Context, namesp
 	if err := h.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: config.HypershiftApiServerServiceMonitorName}, hypershiftApiServerSM); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Permanent error, no need to retry, just log the error
-			h.Logger.Error(err, fmt.Sprintf("the apiserver serviceMonitor %s/%s deployed by hypershift is not found, cannot set observability for etcd", namespace, config.HypershiftApiServerServiceMonitorName), "hostedClusterName", hostedCluster.Name)
+			h.Logger.Error(err, fmt.Sprintf("the apiserver serviceMonitor %s/%s deployed by hypershift is not found, cannot set observability for api server", namespace, config.HypershiftApiServerServiceMonitorName), "hostedClusterName", hostedCluster.Name)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get hypershift's kube-apiserver ServiceMonitor: %w", err)
@@ -213,7 +212,6 @@ func (h *Hypershift) generateApiServerServiceMonitor(ctx context.Context, namesp
 			Scheme:               endpoint.Scheme,
 			Port:                 endpoint.Port,
 			TargetPort:           endpoint.TargetPort,
-			BearerTokenSecret:    &corev1.SecretKeySelector{},
 			TLSConfig:            endpoint.TLSConfig,
 			MetricRelabelConfigs: h.generateMetricsRelabelConfigs(hostedCluster, metrics),
 			RelabelConfigs: []prometheusv1.RelabelConfig{
@@ -230,10 +228,10 @@ func (h *Hypershift) generateApiServerServiceMonitor(ctx context.Context, namesp
 }
 
 // extractDependentMetrics extracts the list of metrics that the input scrapeConfig and rule are dependent on.
-// It ignores metrics reulting from rules.
+// It ignores metrics resulting from rules.
 // Result is alphabetically sorted.
 // This function is used to extract the list of metrics that must be collected by the in-cluster prometheus.
-func (h *Hypershift) extractDependentMetrics(sc []*prometheusalpha1.ScrapeConfig, rule []*prometheusv1.PrometheusRule) ([]string, error) {
+func (h *Hypershift) extractDependentMetrics(sc []*cooprometheusv1alpha1.ScrapeConfig, rule []*prometheusv1.PrometheusRule) ([]string, error) {
 	scMetrics, err := h.federatedMetrics(sc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract federated metrics from ScrapeConfig: %w", err)
@@ -258,7 +256,7 @@ func (h *Hypershift) extractDependentMetrics(sc []*prometheusalpha1.ScrapeConfig
 
 // federatedMetrics returns the list of collected metrics from a scrapeConfig, parsing the
 // federated metrics list. It ignores metrics resulting from rules evaluation.
-func (h *Hypershift) federatedMetrics(scrapeConfigs []*prometheusalpha1.ScrapeConfig) ([]string, error) {
+func (h *Hypershift) federatedMetrics(scrapeConfigs []*cooprometheusv1alpha1.ScrapeConfig) ([]string, error) {
 	ret := []string{}
 
 	for _, scrapeConfig := range scrapeConfigs {

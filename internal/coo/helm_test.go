@@ -15,6 +15,7 @@ import (
 	"github.com/stolostron/multicluster-observability-addon/internal/coo/handlers"
 	"github.com/stolostron/multicluster-observability-addon/internal/coo/manifests"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -61,7 +62,7 @@ func fakeGetValues(ctx context.Context, k8s client.Client) addonfactory.GetValue
 			}
 		}
 
-		installCOO, err := handlers.InstallCOO(ctx, k8s, logr.Discard(), isHub)
+		installCOO, err := handlers.InstallOfCOOOnTheHubIsNeeded(ctx, k8s, logr.Discard(), isHub)
 		if err != nil {
 			return nil, err
 		}
@@ -109,11 +110,52 @@ func Test_IncidentDetection_AllConfigsTogether_AllResources(t *testing.T) {
 		{
 			name: "no config",
 			expectedFunc: func(t *testing.T, objects []runtime.Object) {
-				require.Equal(t, 0, len(objects))
+				require.Empty(t, objects)
 			},
 		},
 		{
-			name: "incident detection",
+			name:  "right-sizing dashboards in observability-analytics namespace",
+			isHub: true,
+			cv: []addonapiv1alpha1.CustomizedVariable{
+				{Name: addon.KeyPlatformNamespaceRightSizing, Value: "enabled"},
+				{Name: addon.KeyPlatformVirtualizationRightSizing, Value: "enabled"},
+			},
+			expectedFunc: func(t *testing.T, objects []runtime.Object) {
+				require.GreaterOrEqual(t, len(objects), 3, "expected at least namespace + datasource + dashboards")
+
+				var analyticsNS bool
+				var analyticsDatasource bool
+				var analyticsDashboards []string
+				var obsDashboards []string
+
+				for _, o := range objects {
+					switch obj := o.(type) {
+					case *corev1.Namespace:
+						if obj.Name == addoncfg.AnalyticsNamespace {
+							analyticsNS = true
+						}
+					case *persesv1.PersesDatasource:
+						if obj.Namespace == addoncfg.AnalyticsNamespace {
+							analyticsDatasource = true
+						}
+					case *persesv1.PersesDashboard:
+						switch obj.Namespace {
+						case addoncfg.AnalyticsNamespace:
+							analyticsDashboards = append(analyticsDashboards, obj.Name)
+						case addoncfg.InstallNamespace:
+							obsDashboards = append(obsDashboards, obj.Name)
+						}
+					}
+				}
+
+				require.True(t, analyticsNS, "observability-analytics namespace should be created")
+				require.True(t, analyticsDatasource, "datasource should exist in observability-analytics")
+				require.GreaterOrEqual(t, len(analyticsDashboards), 2, "expected at least 2 RS dashboards in observability-analytics")
+				require.Empty(t, obsDashboards, "no RS dashboards should be in obs namespace")
+			},
+		},
+		{
+			name: "incident detection dashboards in observability-analytics namespace",
 			cv: []addonapiv1alpha1.CustomizedVariable{
 				{
 					Name:  "platformIncidentDetection",
@@ -123,6 +165,8 @@ func Test_IncidentDetection_AllConfigsTogether_AllResources(t *testing.T) {
 			isHub: true,
 			expectedFunc: func(t *testing.T, objects []runtime.Object) {
 				require.GreaterOrEqual(t, len(objects), 4)
+				// ACM block is only rendered when metrics are enabled;
+				// this test only enables incident detection.
 				expectedUIPluginSpec := uiplugin.UIPluginSpec{
 					Type: "Monitoring",
 					Monitoring: &uiplugin.MonitoringConfig{
@@ -135,13 +179,26 @@ func Test_IncidentDetection_AllConfigsTogether_AllResources(t *testing.T) {
 					},
 				}
 
+				var analyticsNS bool
+				var analyticsDashboards int
+
 				for _, o := range objects {
-					switch o := o.(type) {
+					switch obj := o.(type) {
 					case *uiplugin.UIPlugin:
-						require.Equal(t, "monitoring", o.Name)
-						require.Equal(t, expectedUIPluginSpec, o.Spec)
+						require.Equal(t, "monitoring", obj.Name)
+						require.Equal(t, expectedUIPluginSpec, obj.Spec)
+					case *corev1.Namespace:
+						if obj.Name == addoncfg.AnalyticsNamespace {
+							analyticsNS = true
+						}
+					case *persesv1.PersesDashboard:
+						require.Equal(t, addoncfg.AnalyticsNamespace, obj.Namespace, "incident detection dashboard should be in analytics namespace")
+						analyticsDashboards++
 					}
 				}
+
+				require.True(t, analyticsNS, "observability-analytics namespace should be created")
+				require.GreaterOrEqual(t, analyticsDashboards, 1, "expected at least 1 incident detection dashboard in analytics namespace")
 			},
 		},
 		{
@@ -150,7 +207,15 @@ func Test_IncidentDetection_AllConfigsTogether_AllResources(t *testing.T) {
 			cv: []addonapiv1alpha1.CustomizedVariable{
 				{
 					Name:  "platformMetricsCollection",
-					Value: "prometheusagents.v1alpha1.monitoring.coreos.com",
+					Value: "prometheusagents.v1alpha1.monitoring.rhobs",
+				},
+				{
+					Name:  addon.KeyMetricsHubHostname,
+					Value: "metrics.hub.com",
+				},
+				{
+					Name:  addon.KeyMetricsAlertManagerHostname,
+					Value: "alerts.hub.com",
 				},
 				{
 					Name:  "platformMetricsUI",

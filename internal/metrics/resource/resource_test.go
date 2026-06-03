@@ -7,20 +7,25 @@ import (
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusalpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon/common"
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	"github.com/stolostron/multicluster-observability-addon/internal/metrics/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -36,12 +41,12 @@ func TestGetOrCreateDefaultAgent(t *testing.T) {
 	}
 	platformAppName := config.PlatformMetricsCollectorApp
 	existingPlatformAgent := NewDefaultPrometheusAgent(config.HubInstallNamespace, makeAgentName(platformAppName, placementRef.Name), false, placementRef)
-	assert.NoError(t, controllerutil.SetControllerReference(cmao, existingPlatformAgent, newTestScheme()))
+	require.NoError(t, controllerutil.SetControllerReference(cmao, existingPlatformAgent, newTestScheme()))
 
 	// Existing UWL Agent
 	uwlAppName := config.UserWorkloadMetricsCollectorApp
 	existingUWLAgent := NewDefaultPrometheusAgent(config.HubInstallNamespace, makeAgentName(uwlAppName, placementRef.Name), true, placementRef)
-	assert.NoError(t, controllerutil.SetControllerReference(cmao, existingUWLAgent, newTestScheme()))
+	require.NoError(t, controllerutil.SetControllerReference(cmao, existingUWLAgent, newTestScheme()))
 
 	testCases := []struct {
 		name         string
@@ -91,14 +96,14 @@ func TestGetOrCreateDefaultAgent(t *testing.T) {
 			}
 
 			gotAgent, err := d.getOrCreateDefaultAgent(context.Background(), tc.placementRef, tc.isUWL)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.True(t, controllerutil.HasControllerReference(gotAgent))
 
 			// ensure there is only one agent
 			if err == nil {
-				res := &prometheusalpha1.PrometheusAgentList{}
+				res := &cooprometheusv1alpha1.PrometheusAgentList{}
 				err := fakeClient.List(context.Background(), res)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Len(t, res.Items, 1)
 			}
 
@@ -115,64 +120,125 @@ func TestGetOrCreateDefaultAgent(t *testing.T) {
 func TestReconcileAgent(t *testing.T) {
 	cmao := newCMAO()
 	opts := newAddonOptions(true, true)
-	prmetheusImage := "prometheus:version"
+	kubeRbacImage := "kube-rbac-proxy:version"
+	prometheusImage := "prometheus:version"
 	placementRef := addonv1alpha1.PlacementRef{Name: "my-placement", Namespace: "my-namespace"}
 
 	// Dynamic fake client doesn't support apply types of patch. This is overridden with an interceptor toward a
 	// merge type patch that has no unwanted effect for this unit test.
 	patchCalls := 0
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-		Patch: func(ctx context.Context, clientww client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-			patchCalls++
-			return clientww.Patch(ctx, obj, client.Merge, opts...)
-		},
-	}).WithScheme(newTestScheme()).WithObjects(cmao).Build()
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(ensureGVKIsSet(scheme)).WithScheme(scheme).WithObjects(cmao).Build()
 	d := DefaultStackResources{
-		Client:          fakeClient,
-		CMAO:            cmao,
-		AddonOptions:    opts,
-		Logger:          klog.Background(),
-		PrometheusImage: prmetheusImage,
+		Client:             fakeClient,
+		CMAO:               cmao,
+		AddonOptions:       opts,
+		Logger:             klog.Background(),
+		KubeRBACProxyImage: kubeRbacImage,
+		PrometheusImage:    prometheusImage,
 	}
 
 	// >>> Platform agent
 	retAgent, err := d.reconcileAgentForPlacement(context.Background(), placementRef, false)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	foundAgent := prometheusalpha1.PrometheusAgent{}
+	foundAgent := cooprometheusv1alpha1.PrometheusAgent{}
 	err = fakeClient.Get(context.Background(), types.NamespacedName{Namespace: retAgent.Config.Namespace, Name: retAgent.Config.Name}, &foundAgent)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Check default fields
 	assert.EqualValues(t, 1, *foundAgent.Spec.Replicas)
 	// Check ssa fields
-	// Commented while the stolostron build of prometheus is not based on v3 as it requires support for the --agent flag.
-	// assert.Equal(t, prmetheusImage, *foundAgent.Spec.Image)
-	assert.Nil(t, foundAgent.Spec.Image)
+	assert.Equal(t, kubeRbacImage, foundAgent.Spec.Containers[0].Image)
+	assert.Equal(t, prometheusImage, *foundAgent.Spec.Image)
 	assert.Equal(t, config.PlatformMetricsCollectorApp, foundAgent.Spec.ServiceAccountName)
 	// Check placement labels
 	assert.Equal(t, foundAgent.Labels[addoncfg.PlacementRefNameLabelKey], placementRef.Name)
 	// Check platform specific values: appName and ScrapeConfigNamespaceSelector
-	assert.Equal(t, foundAgent.Spec.ServiceAccountName, config.PlatformMetricsCollectorApp)
+	assert.Equal(t, config.PlatformMetricsCollectorApp, foundAgent.Spec.ServiceAccountName)
 	assert.Nil(t, foundAgent.Spec.ScrapeConfigNamespaceSelector)
 
 	// Subsequent reconcile does not trigger update
 	previousPatchCalls := patchCalls
 	_, err = d.reconcileAgentForPlacement(context.Background(), placementRef, false)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, previousPatchCalls, patchCalls)
 
 	// >>> UWL agent
 	retAgent, err = d.reconcileAgentForPlacement(context.Background(), placementRef, true)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	foundAgent = prometheusalpha1.PrometheusAgent{}
+	foundAgent = cooprometheusv1alpha1.PrometheusAgent{}
 	err = fakeClient.Get(context.Background(), types.NamespacedName{Namespace: retAgent.Config.Namespace, Name: retAgent.Config.Name}, &foundAgent)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Check uwl specific values: appName and ScrapeConfigNamespaceSelector
-	assert.Equal(t, foundAgent.Spec.ServiceAccountName, config.UserWorkloadMetricsCollectorApp)
-	assert.Equal(t, foundAgent.Spec.ScrapeConfigNamespaceSelector, &metav1.LabelSelector{})
+	assert.Equal(t, config.UserWorkloadMetricsCollectorApp, foundAgent.Spec.ServiceAccountName)
+	assert.Equal(t, &metav1.LabelSelector{}, foundAgent.Spec.ScrapeConfigNamespaceSelector)
+}
+
+func TestReconcileAgentWithRegistries(t *testing.T) {
+	cmao := newCMAO()
+	registries := []addonv1alpha1.ImageMirror{
+		{
+			Source: "quay.io/prometheus/prometheus",
+			Mirror: "my-registry.com/prometheus/prometheus",
+		},
+		{
+			Source: "quay.io/kube/rbac-proxy",
+			Mirror: "my-registry.com/kube/rbac-proxy",
+		},
+	}
+	opts := newAddonOptions(true, true)
+	opts.Registries = registries
+
+	baseImages := map[string]string{
+		"prometheus_config_reloader":    "quay.io/prometheus/config-reloader",
+		"kube_rbac_proxy":               "quay.io/kube/rbac-proxy",
+		"obo_prometheus_rhel9_operator": "quay.io/prometheus/obo-operator",
+		"kube_state_metrics":            "quay.io/kube/kube-state-metrics",
+		"node_exporter":                 "quay.io/kube/node-exporter",
+		"prometheus":                    "quay.io/prometheus/prometheus",
+	}
+
+	imagesCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.ImagesConfigMapObjKey.Name,
+			Namespace: config.ImagesConfigMapObjKey.Namespace,
+		},
+		Data: baseImages,
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithInterceptorFuncs(ensureGVKIsSet(scheme)).
+		WithScheme(scheme).
+		WithObjects(cmao, imagesCM).
+		Build()
+
+	images, err := config.GetImageOverrides(context.Background(), fakeClient, opts.Registries, klog.Background())
+	require.NoError(t, err)
+
+	d := DefaultStackResources{
+		Client:             fakeClient,
+		CMAO:               cmao,
+		AddonOptions:       opts,
+		Logger:             klog.Background(),
+		KubeRBACProxyImage: images.KubeRBACProxy,
+		PrometheusImage:    images.Prometheus,
+	}
+
+	placementRef := addonv1alpha1.PlacementRef{Name: "my-placement", Namespace: "my-namespace"}
+	retAgent, err := d.reconcileAgentForPlacement(context.Background(), placementRef, false)
+	require.NoError(t, err)
+
+	foundAgent := cooprometheusv1alpha1.PrometheusAgent{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Namespace: retAgent.Config.Namespace, Name: retAgent.Config.Name}, &foundAgent)
+	require.NoError(t, err)
+
+	// Check overridden images
+	assert.Equal(t, "my-registry.com/prometheus/prometheus", *foundAgent.Spec.Image)
+	assert.Equal(t, "my-registry.com/kube/rbac-proxy", foundAgent.Spec.Containers[0].Image)
 }
 
 func TestReconcile(t *testing.T) {
@@ -196,9 +262,9 @@ func TestReconcile(t *testing.T) {
 		addoncfg.ComponentK8sLabelKey:          config.PlatformMetricsCollectorApp,
 	}
 
-	platformSC := &prometheusalpha1.ScrapeConfig{
+	platformSC := &cooprometheusv1alpha1.ScrapeConfig{
 		TypeMeta: metav1.TypeMeta{
-			Kind: prometheusalpha1.ScrapeConfigsKind,
+			Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: config.HubInstallNamespace,
@@ -212,9 +278,9 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 	}
-	uwlSC := &prometheusalpha1.ScrapeConfig{
+	uwlSC := &cooprometheusv1alpha1.ScrapeConfig{
 		TypeMeta: metav1.TypeMeta{
-			Kind: prometheusalpha1.ScrapeConfigsKind,
+			Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: config.HubInstallNamespace,
@@ -234,9 +300,9 @@ func TestReconcile(t *testing.T) {
 			Namespace: "hcpns",
 		},
 	}
-	hcpApiserverSC := &prometheusalpha1.ScrapeConfig{
+	hcpApiserverSC := &cooprometheusv1alpha1.ScrapeConfig{
 		TypeMeta: metav1.TypeMeta{
-			Kind: prometheusalpha1.ScrapeConfigsKind,
+			Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: config.HubInstallNamespace,
@@ -266,9 +332,9 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 	}
-	hcpEtcdSC := &prometheusalpha1.ScrapeConfig{
+	hcpEtcdSC := &cooprometheusv1alpha1.ScrapeConfig{
 		TypeMeta: metav1.TypeMeta{
-			Kind: prometheusalpha1.ScrapeConfigsKind,
+			Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: config.HubInstallNamespace,
@@ -413,7 +479,7 @@ func TestReconcile(t *testing.T) {
 				Platform: addon.PlatformOptions{
 					Metrics: addon.MetricsOptions{
 						CollectionEnabled: tc.platformEnabled,
-						HubEndpoint:       hubUrl,
+						HubEndpoint:       *hubUrl,
 					},
 				},
 				UserWorkloads: addon.UserWorkloadOptions{
@@ -423,31 +489,28 @@ func TestReconcile(t *testing.T) {
 				},
 			}
 			initObjs := append(tc.initObjs, cmao)
-			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Patch: func(ctx context.Context, clientww client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-					return clientww.Patch(ctx, obj, client.Merge, opts...)
-				},
-			}).WithScheme(newTestScheme()).WithObjects(initObjs...).Build()
+			scheme := newTestScheme()
+			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(ensureGVKIsSet(scheme)).WithScheme(scheme).WithObjects(initObjs...).Build()
 			d := DefaultStackResources{
-				Client:          fakeClient,
-				CMAO:            cmao,
-				Logger:          klog.Background(),
-				AddonOptions:    addonOptions,
-				PrometheusImage: "dummy",
+				Client:             fakeClient,
+				CMAO:               cmao,
+				Logger:             klog.Background(),
+				AddonOptions:       addonOptions,
+				KubeRBACProxyImage: "dummy",
 			}
 
 			dc, err := d.Reconcile(context.Background())
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			err = common.EnsureAddonConfig(context.Background(), klog.Background(), fakeClient, dc)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
-			foundAgents := prometheusalpha1.PrometheusAgentList{}
+			foundAgents := cooprometheusv1alpha1.PrometheusAgentList{}
 			err = fakeClient.List(context.Background(), &foundAgents)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Len(t, foundAgents.Items, tc.expectAgentsCount)
 
 			err = fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cmao), cmao)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			for _, placement := range cmao.Spec.InstallStrategy.Placements {
 				assert.Len(t, placement.Configs, tc.expectConfigsCount)
@@ -471,7 +534,7 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 		initObjs          []client.Object
 		isUWL             bool
 		hasHostedClusters bool
-		expects           func(*testing.T, []prometheusalpha1.ScrapeConfig)
+		expects           func(*testing.T, []cooprometheusv1alpha1.ScrapeConfig)
 	}{
 		{
 			name: "no scrape configs",
@@ -479,9 +542,9 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 		{
 			name: "unmanaged SC is ignored",
 			initObjs: []client.Object{
-				&prometheusalpha1.ScrapeConfig{
+				&cooprometheusv1alpha1.ScrapeConfig{
 					TypeMeta: metav1.TypeMeta{
-						Kind: prometheusalpha1.ScrapeConfigsKind,
+						Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: config.HubInstallNamespace,
@@ -490,16 +553,16 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 					},
 				},
 			},
-			expects: func(t *testing.T, objs []prometheusalpha1.ScrapeConfig) {
-				assert.Len(t, objs, 0)
+			expects: func(t *testing.T, objs []cooprometheusv1alpha1.ScrapeConfig) {
+				assert.Empty(t, objs)
 			},
 		},
 		{
 			name: "SC target is enforced for platform",
 			initObjs: []client.Object{
-				&prometheusalpha1.ScrapeConfig{
+				&cooprometheusv1alpha1.ScrapeConfig{
 					TypeMeta: metav1.TypeMeta{
-						Kind: prometheusalpha1.ScrapeConfigsKind,
+						Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace:       config.HubInstallNamespace,
@@ -507,22 +570,24 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 						Labels:          config.PlatformPrometheusMatchLabels,
 						OwnerReferences: []metav1.OwnerReference{mcoOwnerRef},
 					},
-					Spec: prometheusalpha1.ScrapeConfigSpec{
+					Spec: cooprometheusv1alpha1.ScrapeConfigSpec{
 						ScrapeClassName: ptr.To("invalid"),
 					},
 				},
 			},
-			expects: func(t *testing.T, objs []prometheusalpha1.ScrapeConfig) {
+			expects: func(t *testing.T, objs []cooprometheusv1alpha1.ScrapeConfig) {
 				assert.Len(t, objs, 1)
-				assert.Equal(t, *objs[0].Spec.ScrapeClassName, config.ScrapeClassCfgName)
+				assert.Equal(t, "not-configurable", *objs[0].Spec.ScrapeClassName)
+				assert.Contains(t, objs[0].Labels, addoncfg.BackupLabelKey, "backup label key should be present")
+				assert.Equal(t, addoncfg.BackupLabelValue, objs[0].Labels[addoncfg.BackupLabelKey])
 			},
 		},
 		{
 			name: "SC target is left for uwl",
 			initObjs: []client.Object{
-				&prometheusalpha1.ScrapeConfig{
+				&cooprometheusv1alpha1.ScrapeConfig{
 					TypeMeta: metav1.TypeMeta{
-						Kind: prometheusalpha1.ScrapeConfigsKind,
+						Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace:       config.HubInstallNamespace,
@@ -530,28 +595,30 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 						Labels:          config.UserWorkloadPrometheusMatchLabels,
 						OwnerReferences: []metav1.OwnerReference{mcoOwnerRef},
 					},
-					Spec: prometheusalpha1.ScrapeConfigSpec{
+					Spec: cooprometheusv1alpha1.ScrapeConfigSpec{
 						ScrapeClassName: ptr.To("custom"),
-						StaticConfigs: []prometheusalpha1.StaticConfig{
+						StaticConfigs: []cooprometheusv1alpha1.StaticConfig{
 							{
-								Targets: []prometheusalpha1.Target{"test"},
+								Targets: []cooprometheusv1alpha1.Target{"test"},
 							},
 						},
 					},
 				},
 			},
 			isUWL: true,
-			expects: func(t *testing.T, objs []prometheusalpha1.ScrapeConfig) {
+			expects: func(t *testing.T, objs []cooprometheusv1alpha1.ScrapeConfig) {
 				assert.Len(t, objs, 1)
-				assert.Equal(t, *objs[0].Spec.ScrapeClassName, "custom")
+				assert.Equal(t, "custom", *objs[0].Spec.ScrapeClassName)
+				assert.Contains(t, objs[0].Labels, addoncfg.BackupLabelKey, "backup label key should be present")
+				assert.Equal(t, addoncfg.BackupLabelValue, objs[0].Labels[addoncfg.BackupLabelKey])
 			},
 		},
 		{
 			name: "hcp SC is handled",
 			initObjs: []client.Object{
-				&prometheusalpha1.ScrapeConfig{
+				&cooprometheusv1alpha1.ScrapeConfig{
 					TypeMeta: metav1.TypeMeta{
-						Kind: prometheusalpha1.ScrapeConfigsKind,
+						Kind: cooprometheusv1alpha1.ScrapeConfigsKind,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace:       config.HubInstallNamespace,
@@ -563,9 +630,11 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 			},
 			isUWL:             true,
 			hasHostedClusters: true,
-			expects: func(t *testing.T, objs []prometheusalpha1.ScrapeConfig) {
+			expects: func(t *testing.T, objs []cooprometheusv1alpha1.ScrapeConfig) {
 				assert.Len(t, objs, 1)
-				assert.Equal(t, *objs[0].Spec.ScrapeClassName, config.ScrapeClassCfgName)
+				assert.Empty(t, objs[0].Spec.ScrapeClassName)
+				assert.Contains(t, objs[0].Labels, addoncfg.BackupLabelKey, "backup label key should be present")
+				assert.Equal(t, addoncfg.BackupLabelValue, objs[0].Labels[addoncfg.BackupLabelKey])
 			},
 		},
 	}
@@ -577,26 +646,23 @@ func TestReconcileScrapeConfigs(t *testing.T) {
 				PlacementRef: placementRefA,
 			})
 			initObjs := append(tc.initObjs, cmao)
-			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Patch: func(ctx context.Context, clientww client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-					return clientww.Patch(ctx, obj, client.Merge, opts...)
-				},
-			}).WithScheme(newTestScheme()).WithObjects(initObjs...).Build()
+			scheme := newTestScheme()
+			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(ensureGVKIsSet(scheme)).WithScheme(scheme).WithObjects(initObjs...).Build()
 			d := DefaultStackResources{
-				CMAO:            cmao,
-				Client:          fakeClient,
-				Logger:          klog.Background(),
-				PrometheusImage: "dummy",
+				CMAO:               cmao,
+				Client:             fakeClient,
+				Logger:             klog.Background(),
+				KubeRBACProxyImage: "dummy",
 			}
 
 			dc, err := d.reconcileScrapeConfigs(context.Background(), mcoUID, tc.isUWL, tc.hasHostedClusters)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
-			scrapeConfigs := []prometheusalpha1.ScrapeConfig{}
+			scrapeConfigs := []cooprometheusv1alpha1.ScrapeConfig{}
 			for _, config := range dc {
-				sc := prometheusalpha1.ScrapeConfig{}
+				sc := cooprometheusv1alpha1.ScrapeConfig{}
 				err = fakeClient.Get(context.Background(), client.ObjectKey(config.Config.ConfigReferent), &sc)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				scrapeConfigs = append(scrapeConfigs, sc)
 			}
 			if tc.expects != nil {
@@ -643,7 +709,7 @@ func TestGetPrometheusRules(t *testing.T) {
 			},
 			platformEnabled: true,
 			expects: func(t *testing.T, objs []prometheusv1.PrometheusRule) {
-				assert.Len(t, objs, 0)
+				assert.Empty(t, objs)
 			},
 		},
 		{
@@ -673,7 +739,7 @@ func TestGetPrometheusRules(t *testing.T) {
 				},
 			},
 			expects: func(t *testing.T, objs []prometheusv1.PrometheusRule) {
-				assert.Len(t, objs, 0)
+				assert.Empty(t, objs)
 			},
 		},
 		{
@@ -758,16 +824,13 @@ func TestGetPrometheusRules(t *testing.T) {
 				PlacementRef: placementRefA,
 			})
 			initObjs := append(tc.initObjs, cmao)
-			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Patch: func(ctx context.Context, clientww client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-					return clientww.Patch(ctx, obj, client.Merge, opts...)
-				},
-			}).WithScheme(newTestScheme()).WithObjects(initObjs...).Build()
+			scheme := newTestScheme()
+			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(ensureGVKIsSet(scheme)).WithScheme(scheme).WithObjects(initObjs...).Build()
 			d := DefaultStackResources{
-				CMAO:            cmao,
-				Client:          fakeClient,
-				Logger:          klog.Background(),
-				PrometheusImage: "dummy",
+				CMAO:               cmao,
+				Client:             fakeClient,
+				Logger:             klog.Background(),
+				KubeRBACProxyImage: "dummy",
 				AddonOptions: addon.Options{
 					Platform: addon.PlatformOptions{
 						Metrics: addon.MetricsOptions{
@@ -783,13 +846,13 @@ func TestGetPrometheusRules(t *testing.T) {
 			}
 
 			dc, err := d.getPrometheusRules(context.Background(), mcoUID, tc.hasHostedClusters)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			rules := []prometheusv1.PrometheusRule{}
 			for _, config := range dc {
 				rule := prometheusv1.PrometheusRule{}
 				err = fakeClient.Get(context.Background(), client.ObjectKey(config.Config.ConfigReferent), &rule)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				rules = append(rules, rule)
 			}
 			if tc.expects != nil {
@@ -801,8 +864,10 @@ func TestGetPrometheusRules(t *testing.T) {
 
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
+	_ = kubescheme.AddToScheme(s)
 	_ = addonv1alpha1.AddToScheme(s)
-	_ = prometheusalpha1.AddToScheme(s)
+	_ = cooprometheusv1alpha1.AddToScheme(s)
+	_ = cooprometheusv1.AddToScheme(s)
 	_ = prometheusv1.AddToScheme(s)
 	_ = hyperv1.AddToScheme(s)
 	return s
@@ -834,13 +899,54 @@ func newAddonOptions(platformEnabled, uwlEnabled bool) addon.Options {
 		Platform: addon.PlatformOptions{
 			Metrics: addon.MetricsOptions{
 				CollectionEnabled: platformEnabled,
-				HubEndpoint:       hubEp,
+				HubEndpoint:       *hubEp,
 			},
 		},
 		UserWorkloads: addon.UserWorkloadOptions{
 			Metrics: addon.MetricsOptions{
 				CollectionEnabled: uwlEnabled,
 			},
+		},
+	}
+}
+
+func ensureGVKIsSet(scheme *runtime.Scheme) interceptor.Funcs {
+	return interceptor.Funcs{
+		Get: func(ctx context.Context, clientww client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			err := clientww.Get(ctx, key, obj, opts...)
+			if err != nil {
+				return err
+			}
+			gvk, err := apiutil.GVKForObject(obj, scheme)
+			if err == nil {
+				obj.GetObjectKind().SetGroupVersionKind(gvk)
+			}
+			return nil
+		},
+		Patch: func(ctx context.Context, clientww client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			gvk, _ := apiutil.GVKForObject(obj, scheme)
+			if !gvk.Empty() {
+				obj.GetObjectKind().SetGroupVersionKind(gvk)
+			}
+			err := clientww.Patch(ctx, obj, patch, opts...)
+			if err == nil && !gvk.Empty() {
+				obj.GetObjectKind().SetGroupVersionKind(gvk)
+			}
+			return err
+		},
+		List: func(ctx context.Context, clientww client.WithWatch, obj client.ObjectList, opts ...client.ListOption) error {
+			err := clientww.List(ctx, obj, opts...)
+			if err != nil {
+				return err
+			}
+			return meta.EachListItem(obj, func(object runtime.Object) error {
+				gvk, err := apiutil.GVKForObject(object, scheme)
+				if err != nil {
+					return nil
+				}
+				object.GetObjectKind().SetGroupVersionKind(gvk)
+				return nil
+			})
 		},
 	}
 }

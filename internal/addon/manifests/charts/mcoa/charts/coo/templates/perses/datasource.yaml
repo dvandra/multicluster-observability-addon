@@ -12,10 +12,11 @@ spec:
         type: file
       enable: true
   config:
-    default: true
+    default: false
     plugin:
       kind: PrometheusDatasource
       spec:
+        scrapeInterval: "5m"
         proxy:
           kind: HTTPProxy
           spec:

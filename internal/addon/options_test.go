@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 )
 
@@ -25,7 +28,17 @@ func TestBuildOptions(t *testing.T) {
 			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
 				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{},
 			},
-			expectedOpts: Options{},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "invalid name key",
@@ -36,7 +49,17 @@ func TestBuildOptions(t *testing.T) {
 					},
 				},
 			},
-			expectedOpts: Options{},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "valid metrics without scheme for hub",
@@ -46,6 +69,7 @@ func TestBuildOptions(t *testing.T) {
 						{Name: KeyPlatformMetricsCollection, Value: string(PrometheusAgentV1alpha1)},
 						{Name: KeyUserWorkloadMetricsCollection, Value: string(PrometheusAgentV1alpha1)},
 						{Name: KeyMetricsHubHostname, Value: "metrics.example.com"},
+						{Name: KeyMetricsAlertManagerHostname, Value: "alerts.example.com"},
 					},
 				},
 			},
@@ -54,10 +78,21 @@ func TestBuildOptions(t *testing.T) {
 					Enabled: true,
 					Metrics: MetricsOptions{
 						CollectionEnabled: true,
-						HubEndpoint: &url.URL{
+						HubEndpoint: url.URL{
 							Scheme: "https",
 							Host:   "metrics.example.com",
 							Path:   "api/metrics/v1/default/api/v1/receive",
+						},
+						AlertManagerEndpoint: url.URL{
+							Scheme: "https",
+							Host:   "alerts.example.com",
+							Path:   "",
+						},
+					},
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
 						},
 					},
 				},
@@ -77,6 +112,7 @@ func TestBuildOptions(t *testing.T) {
 						{Name: KeyPlatformMetricsCollection, Value: string(PrometheusAgentV1alpha1)},
 						{Name: KeyUserWorkloadMetricsCollection, Value: string(PrometheusAgentV1alpha1)},
 						{Name: KeyMetricsHubHostname, Value: "https://metrics.example.com"},
+						{Name: KeyMetricsAlertManagerHostname, Value: "https://alerts.example.com"},
 					},
 				},
 			},
@@ -85,10 +121,21 @@ func TestBuildOptions(t *testing.T) {
 					Enabled: true,
 					Metrics: MetricsOptions{
 						CollectionEnabled: true,
-						HubEndpoint: &url.URL{
+						HubEndpoint: url.URL{
 							Scheme: "https",
 							Host:   "metrics.example.com",
 							Path:   "api/metrics/v1/default/api/v1/receive",
+						},
+						AlertManagerEndpoint: url.URL{
+							Scheme: "https",
+							Host:   "alerts.example.com",
+							Path:   "",
+						},
+					},
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
 						},
 					},
 				},
@@ -129,6 +176,12 @@ func TestBuildOptions(t *testing.T) {
 						CollectionEnabled:   true,
 						SubscriptionChannel: "stable-6",
 					},
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
 				},
 				UserWorkloads: UserWorkloadOptions{
 					Enabled: true,
@@ -150,6 +203,15 @@ func TestBuildOptions(t *testing.T) {
 				},
 			},
 			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
 				UserWorkloads: UserWorkloadOptions{
 					Enabled: true,
 					Traces: TracesOptions{
@@ -175,9 +237,265 @@ func TestBuildOptions(t *testing.T) {
 						IncidentDetection: IncidentDetection{
 							Enabled: true,
 						},
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
 					},
 				},
 			},
+		},
+		{
+			name: "right-sizing enabled explicitly",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "enabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "enabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "right-sizing workload-pod enabled explicitly",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "enabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "enabled"},
+						{Name: KeyPlatformWorkloadPodRightSizing, Value: "enabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+							WorkloadPodEnabled:    true,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "right-sizing GPU enabled explicitly",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "enabled"},
+						{Name: KeyPlatformGPURightSizing, Value: "enabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+							GPUEnabled:            true,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "right-sizing disabled explicitly",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "disabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "disabled"},
+					},
+				},
+			},
+			// Platform.Enabled is true because RS keys are present (even "disabled").
+			// This ensures the rendering pipeline runs so the addon framework can prune
+			// stale ManifestWork content when both RS features are disabled.
+			expectedOpts: Options{
+				Platform: PlatformOptions{Enabled: true},
+			},
+		},
+		{
+			name: "valid node selector and tolerations",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					NodePlacement: &addonapiv1alpha1.NodePlacement{
+						NodeSelector: map[string]string{"node-role.kubernetes.io/infra": ""},
+						Tolerations: []corev1.Toleration{
+							{
+								Key:      "node-role.kubernetes.io/infra",
+								Operator: "Exists",
+								Effect:   "NoSchedule",
+							},
+						},
+					},
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "disabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "disabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform:     PlatformOptions{Enabled: true},
+				NodeSelector: map[string]string{"node-role.kubernetes.io/infra": ""},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "node-role.kubernetes.io/infra",
+						Operator: "Exists",
+						Effect:   "NoSchedule",
+					},
+				},
+			},
+		},
+		{
+			name: "valid resource requirements",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					ResourceRequirements: []addonapiv1alpha1.ContainerResourceRequirements{
+						{
+							ContainerID: "deployments:platform-metrics:collector",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("100m"),
+									corev1.ResourceMemory: resource.MustParse("3000Mi"),
+								},
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("10m"),
+									corev1.ResourceMemory: resource.MustParse("128Mi"),
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedOpts: Options{
+				ResourceReqs: []addonapiv1alpha1.ContainerResourceRequirements{
+					{
+						ContainerID: "deployments:platform-metrics:collector",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("3000Mi"),
+							},
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("10m"),
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
+						},
+					},
+				},
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "valid http proxy and no proxy",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					ProxyConfig: addonapiv1alpha1.ProxyConfig{
+						HTTPProxy: "http://proxy.example.com:8080",
+						NoProxy:   "*.example.com",
+					},
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "disabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "disabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{Enabled: true},
+				ProxyConfig: ProxyConfig{
+					ProxyURL: &url.URL{
+						Scheme: "http",
+						Host:   "proxy.example.com:8080",
+					},
+					NoProxy: "*.example.com",
+				},
+			},
+		},
+		{
+			name: "valid node exporter ports",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyNodeExporterHostPort, Value: "19100"},
+						{Name: KeyNodeExporterInternalPort, Value: "19101"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					Metrics: MetricsOptions{
+						NodeExporter: NodeExporterOptions{
+							HostPort:     19100,
+							InternalPort: 19101,
+						},
+					},
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							NamespaceEnabled:      true,
+							VirtualizationEnabled: true,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "invalid node exporter host port - format",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyNodeExporterHostPort, Value: "abc"},
+					},
+				},
+			},
+			expectedErrMsg: "invalid port format for nodeExporterHostPort",
+		},
+		{
+			name: "invalid node exporter host port - out of bounds high",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyNodeExporterHostPort, Value: "65536"},
+					},
+				},
+			},
+			expectedErrMsg: "invalid port: 65536 for nodeExporterHostPort must be between 1 and 65535",
+		},
+		{
+			name: "invalid node exporter port - out of bounds low",
+			addOnDeploy: &addonapiv1alpha1.AddOnDeploymentConfig{
+				Spec: addonapiv1alpha1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1alpha1.CustomizedVariable{
+						{Name: KeyNodeExporterInternalPort, Value: "0"},
+					},
+				},
+			},
+			expectedErrMsg: "invalid port: 0 for nodeExporterInternalPort must be between 1 and 65535",
 		},
 	}
 
@@ -185,10 +503,10 @@ func TestBuildOptions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opts, err := BuildOptions(tc.addOnDeploy)
 			if tc.expectedErrMsg != "" {
-				assert.Error(t, err)
-				assert.Equal(t, err.Error(), tc.expectedErrMsg)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tc.expectedErrMsg)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tc.expectedOpts, opts)
 			}
 		})

@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusalpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon/common"
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
@@ -24,7 +24,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-var errTooManyConfigResources = errors.New("too many configuration resources")
+var (
+	errTooManyConfigResources = errors.New("too many configuration resources")
+	errMissingHubEndpoint     = errors.New("hub endpoint is missing")
+)
 
 // DefaultStackResources reconciles the configuration resources needed for metrics collection
 type DefaultStackResources struct {
@@ -125,7 +128,7 @@ func (d DefaultStackResources) reconcileScrapeConfigs(ctx context.Context, mcoUI
 	}
 	labelsSelector := labels.NewSelector().Add(*req)
 
-	scrapeConfigsList := &prometheusalpha1.ScrapeConfigList{}
+	scrapeConfigsList := &cooprometheusv1alpha1.ScrapeConfigList{}
 	if err = d.Client.List(ctx, scrapeConfigsList, client.InNamespace(addoncfg.InstallNamespace), client.MatchingLabelsSelector{Selector: labelsSelector}); err != nil {
 		return nil, fmt.Errorf("failed to list scrapeConfigs: %w", err)
 	}
@@ -139,26 +142,27 @@ func (d DefaultStackResources) reconcileScrapeConfigs(ctx context.Context, mcoUI
 		desiredSC := existingSC.DeepCopy()
 		desiredSC.ManagedFields = nil // required for patching with ssa
 
-		target := config.ScrapeClassPlatformTarget
-		if isUWL {
-			target = config.ScrapeClassUWLTarget
+		if desiredSC.Labels == nil {
+			desiredSC.Labels = map[string]string{}
 		}
+		desiredSC.Labels[addoncfg.BackupLabelKey] = addoncfg.BackupLabelValue
 
-		if !isUWL || (isUWL && len(desiredSC.Spec.StaticConfigs) == 0) {
-			// If a scrape class is already set for a uwl, don't override
-			desiredSC.Spec.ScrapeClassName = ptr.To(config.ScrapeClassCfgName)
+		if !isUWL {
+			// Enforce empty values, they are set when generating the manifests for a given managedCluster
+			desiredSC.Spec.ScrapeClassName = ptr.To("not-configurable")
 			desiredSC.Spec.Scheme = ptr.To("HTTPS")
-			desiredSC.Spec.StaticConfigs = []prometheusalpha1.StaticConfig{
+			desiredSC.Spec.StaticConfigs = []cooprometheusv1alpha1.StaticConfig{
 				{
-					Targets: []prometheusalpha1.Target{
-						prometheusalpha1.Target(target),
+					Targets: []cooprometheusv1alpha1.Target{
+						"not-configurable",
 					},
 				},
 			}
 		}
 
 		// SSA the objects rendered
-		if !equality.Semantic.DeepDerivative(desiredSC.Spec, existingSC.Spec) {
+		if !equality.Semantic.DeepDerivative(desiredSC.Spec, existingSC.Spec) ||
+			!equality.Semantic.DeepDerivative(desiredSC.Labels, existingSC.Labels) {
 			if err = common.ServerSideApply(ctx, d.Client, desiredSC, nil); err != nil { // object is controlled by MCO, no owner
 				return nil, fmt.Errorf("failed to patch with with server-side apply: %w", err)
 			}
@@ -207,7 +211,7 @@ func (d DefaultStackResources) getPrometheusRules(ctx context.Context, mcoUID ty
 
 	promRuleList := &prometheusv1.PrometheusRuleList{}
 	if err = d.Client.List(ctx, promRuleList, client.InNamespace(addoncfg.InstallNamespace), client.MatchingLabelsSelector{Selector: labelSelector}); err != nil {
-		return nil, fmt.Errorf("failed to list scrapeConfigs: %w", err)
+		return nil, fmt.Errorf("failed to list prometheusRules: %w", err)
 	}
 
 	promRules := []client.Object{}
@@ -235,14 +239,17 @@ func (d DefaultStackResources) reconcileAgentForPlacement(ctx context.Context, p
 		return common.DefaultConfig{}, fmt.Errorf("failed to get or create agent for placement %s: %w", placementRef.Name, err)
 	}
 
+	if d.AddonOptions.Platform.Metrics.HubEndpoint.Host == "" {
+		return common.DefaultConfig{}, errMissingHubEndpoint
+	}
+
 	// SSA mendatory field values
 	promBuilder := PrometheusAgentSSA{
 		ExistingAgent:       agent,
 		IsUwl:               isUWL,
+		PrometheusImage:     d.PrometheusImage,
+		KubeRBACProxyImage:  d.KubeRBACProxyImage,
 		RemoteWriteEndpoint: d.AddonOptions.Platform.Metrics.HubEndpoint.String(),
-		// Commented while the stolostron build of prometheus is not based on v3 as it requires support for the --agent flag.
-		// PrometheusImage:     d.PrometheusImage,
-		KubeRBACProxyImage: d.KubeRBACProxyImage,
 		Labels: map[string]string{
 			addoncfg.PlacementRefNameLabelKey:      placementRef.Name,
 			addoncfg.PlacementRefNamespaceLabelKey: placementRef.Namespace,
@@ -258,7 +265,7 @@ func (d DefaultStackResources) reconcileAgentForPlacement(ctx context.Context, p
 		d.Logger.Info("updated prometheus agent with server-side apply", "namespace", promSSA.Namespace, "name", promSSA.Name)
 	}
 
-	cfg, err := common.ObjectToAddonConfig(agent)
+	cfg, err := common.ObjectToAddonConfig(promSSA)
 	if err != nil {
 		return common.DefaultConfig{}, fmt.Errorf("failed to generate addon config for %s: %w", agent.Name, err)
 	}
@@ -269,8 +276,8 @@ func (d DefaultStackResources) reconcileAgentForPlacement(ctx context.Context, p
 	}, nil
 }
 
-func (d DefaultStackResources) getOrCreateDefaultAgent(ctx context.Context, placementRef addonv1alpha1.PlacementRef, isUWL bool) (*prometheusalpha1.PrometheusAgent, error) {
-	promAgents := &prometheusalpha1.PrometheusAgentList{}
+func (d DefaultStackResources) getOrCreateDefaultAgent(ctx context.Context, placementRef addonv1alpha1.PlacementRef, isUWL bool) (*cooprometheusv1alpha1.PrometheusAgent, error) {
+	promAgents := &cooprometheusv1alpha1.PrometheusAgentList{}
 	if err := d.Client.List(ctx, promAgents, &client.ListOptions{
 		Namespace:     config.HubInstallNamespace,
 		LabelSelector: labels.SelectorFromSet(labels.Set(makeConfigResourceLabels(isUWL, placementRef))),
@@ -305,7 +312,15 @@ func (d DefaultStackResources) getOrCreateDefaultAgent(ctx context.Context, plac
 	}
 	d.Logger.Info("created default prometheus agent for placement", "agentNamespace", agent.Namespace, "agentName", agent.Name, "placementName", placementRef.Name)
 
-	return agent, nil
+	// Re-fetch the agent to populate server-side fields and, critically, TypeMeta.
+	// The 'agent' object was mutated by Create() and its TypeMeta is now empty.
+	key := client.ObjectKeyFromObject(agent)
+	createdAgent := &cooprometheusv1alpha1.PrometheusAgent{}
+	if err := d.Client.Get(ctx, key, createdAgent); err != nil {
+		return nil, fmt.Errorf("failed to re-fetch created default agent %q: %w", key, err)
+	}
+
+	return createdAgent, nil
 }
 
 func (d DefaultStackResources) generateConfigsForAllPlacements(object []client.Object) ([]common.DefaultConfig, error) {

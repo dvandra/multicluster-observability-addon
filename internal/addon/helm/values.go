@@ -2,42 +2,35 @@ package helm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
-	clusterinfov1beta1 "github.com/stolostron/cluster-lifecycle-api/clusterinfo/v1beta1"
-	clusterlifecycleconstants "github.com/stolostron/cluster-lifecycle-api/constants"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon/common"
-	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
+	rshandlers "github.com/stolostron/multicluster-observability-addon/internal/analytics/rightsizing/handlers"
 	chandlers "github.com/stolostron/multicluster-observability-addon/internal/coo/handlers"
 	cmanifests "github.com/stolostron/multicluster-observability-addon/internal/coo/manifests"
 	lhandlers "github.com/stolostron/multicluster-observability-addon/internal/logging/handlers"
 	lmanifests "github.com/stolostron/multicluster-observability-addon/internal/logging/manifests"
 	mhandlers "github.com/stolostron/multicluster-observability-addon/internal/metrics/handlers"
 	mmanifests "github.com/stolostron/multicluster-observability-addon/internal/metrics/manifests"
+	omanifests "github.com/stolostron/multicluster-observability-addon/internal/obsapi/manifests"
 	thandlers "github.com/stolostron/multicluster-observability-addon/internal/tracing/handlers"
 	tmanifests "github.com/stolostron/multicluster-observability-addon/internal/tracing/manifests"
 	"open-cluster-management.io/addon-framework/pkg/addonfactory"
-	addonutils "open-cluster-management.io/addon-framework/pkg/utils"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var (
-	errMissingAODCRef     = errors.New("missing required AddOnDeploymentConfig reference in addon configuration")
-	errMultipleAODCRef    = errors.New("addonmultiple AddOnDeploymentConfig references found - only one is supported")
-	errMissingHubEndpoint = errors.New("metricsHubHostname key is missing but it's required when either platformMetricsCollection or userWorkloadMetricsCollection are present")
-)
-
 type HelmChartValues struct {
-	Enabled bool                      `json:"enabled"`
-	Metrics *mmanifests.MetricsValues `json:"metrics,omitempty"`
-	Logging *lmanifests.LoggingValues `json:"logging,omitempty"`
-	Tracing *tmanifests.TracingValues `json:"tracing,omitempty"`
-	COO     *cmanifests.COOValues     `json:"coo,omitempty"`
+	Enabled     bool                          `json:"enabled"`
+	Metrics     *mmanifests.MetricsValues     `json:"metrics,omitempty"`
+	Logging     *lmanifests.LoggingValues     `json:"logging,omitempty"`
+	Tracing     *tmanifests.TracingValues     `json:"tracing,omitempty"`
+	COO         *cmanifests.COOValues         `json:"coo,omitempty"`
+	RightSizing *rshandlers.RightSizingValues `json:"rightSizing,omitempty"`
+	ObsAPI      *omanifests.ObsAPIValues      `json:"obs-api,omitempty"`
 }
 
 func GetValuesFunc(ctx context.Context, k8s client.Client, logger logr.Logger) addonfactory.GetValuesFunc {
@@ -47,14 +40,8 @@ func GetValuesFunc(ctx context.Context, k8s client.Client, logger logr.Logger) a
 	) (addonfactory.Values, error) {
 		logger = logger.WithValues("cluster", cluster.Name)
 		logger.V(2).Info("reconciliation triggered")
-		// if hub cluster, then don't install anything.
-		// some kube flavors are also currently not supported
-		if !supportedKubeVendors(cluster) {
-			logger.V(2).Info("unsupported kubernetes vendor, ignoring cluster")
-			return addonfactory.JsonStructToValues(HelmChartValues{})
-		}
 
-		aodc, err := getAddOnDeploymentConfig(ctx, k8s, mcAddon)
+		aodc, err := common.GetAddOnDeploymentConfig(ctx, k8s, mcAddon)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get AddOnDeploymentConfig: %w", err)
 		}
@@ -92,6 +79,15 @@ func GetValuesFunc(ctx context.Context, k8s client.Client, logger logr.Logger) a
 			return nil, err
 		}
 
+		userValues.RightSizing, err = getRightSizingValues(ctx, k8s, logger, cluster, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get right-sizing values: %w", err)
+		}
+
+		// WIP: Temporary solution to enable obs-api and will require to delete the mcoa pod to take effect.
+		obsAPIEnabled := aodc.Annotations["mcoa-obs-api"] == "true"
+		userValues.ObsAPI = omanifests.BuildValues(common.IsHubCluster(cluster), obsAPIEnabled)
+
 		return addonfactory.JsonStructToValues(userValues)
 	}
 }
@@ -102,16 +98,11 @@ func getMonitoringValues(ctx context.Context, k8s client.Client, logger logr.Log
 		return nil, nil
 	}
 
-	if opts.Platform.Metrics.HubEndpoint == nil || opts.Platform.Metrics.HubEndpoint.Host == "" {
-		return nil, errMissingHubEndpoint
-	}
-
 	optsBuilder := mhandlers.OptionsBuilder{
-		Client:         k8s,
-		RemoteWriteURL: opts.Platform.Metrics.HubEndpoint.String(),
-		Logger:         logger,
+		Client: k8s,
+		Logger: logger,
 	}
-	metricsOpts, err := optsBuilder.Build(ctx, mcAddon, cluster, opts.Platform.Metrics, opts.UserWorkloads.Metrics)
+	metricsOpts, err := optsBuilder.Build(ctx, mcAddon, cluster, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +115,11 @@ func getLoggingValues(ctx context.Context, k8s client.Client, cluster *clusterv1
 		return nil, nil
 	}
 
-	loggingOpts, err := lhandlers.BuildOptions(ctx, k8s, mcAddon, opts.Platform.Logs, opts.UserWorkloads.Logs, isHubCluster(cluster))
+	if !common.IsOpenShiftVendor(cluster) {
+		return nil, nil
+	}
+
+	loggingOpts, err := lhandlers.BuildOptions(ctx, k8s, mcAddon, opts.Platform.Logs, opts.UserWorkloads.Logs, common.IsHubCluster(cluster))
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +128,11 @@ func getLoggingValues(ctx context.Context, k8s client.Client, cluster *clusterv1
 }
 
 func getTracingValues(ctx context.Context, k8s client.Client, cluster *clusterv1.ManagedCluster, mcAddon *addonapiv1alpha1.ManagedClusterAddOn, opts addon.Options) (*tmanifests.TracingValues, error) {
-	if isHubCluster(cluster) || !opts.UserWorkloads.Traces.CollectionEnabled {
+	if common.IsHubCluster(cluster) || !opts.UserWorkloads.Traces.CollectionEnabled {
+		return nil, nil
+	}
+
+	if !common.IsOpenShiftVendor(cluster) {
 		return nil, nil
 	}
 
@@ -151,34 +150,29 @@ func getTracingValues(ctx context.Context, k8s client.Client, cluster *clusterv1
 }
 
 func getCOOValues(ctx context.Context, k8s client.Client, logger logr.Logger, cluster *clusterv1.ManagedCluster, opts addon.Options) (*cmanifests.COOValues, error) {
-	installCOO, err := chandlers.InstallCOO(ctx, k8s, logger, isHubCluster(cluster))
+	if !common.IsOpenShiftVendor(cluster) {
+		return nil, nil
+	}
+
+	installCOO, err := chandlers.InstallOfCOOOnTheHubIsNeeded(ctx, k8s, logger, common.IsHubCluster(cluster))
 	if err != nil {
 		return nil, err
 	}
 
-	return cmanifests.BuildValues(opts, installCOO, isHubCluster(cluster)), nil
+	return cmanifests.BuildValues(opts, installCOO, common.IsHubCluster(cluster)), nil
 }
 
-func getAddOnDeploymentConfig(ctx context.Context, k8s client.Client, mcAddon *addonapiv1alpha1.ManagedClusterAddOn) (*addonapiv1alpha1.AddOnDeploymentConfig, error) {
-	aodc := &addonapiv1alpha1.AddOnDeploymentConfig{}
-	keys := common.GetObjectKeys(mcAddon.Status.ConfigReferences, addonutils.AddOnDeploymentConfigGVR.Group, addoncfg.AddonDeploymentConfigResource)
-	switch {
-	case len(keys) == 0:
-		return aodc, errMissingAODCRef
-	case len(keys) > 1:
-		return aodc, errMultipleAODCRef
+func getRightSizingValues(ctx context.Context, k8s client.Client, logger logr.Logger, cluster *clusterv1.ManagedCluster, opts addon.Options) (*rshandlers.RightSizingValues, error) {
+	// Prediction ADC fields on opts.Platform.AnalyticsOptions.RightSizing flow through
+	// OptionsBuilder.Build into handlers.Options, then BuildValues emits .Values.rightSizing.prediction.
+	rsOptsBuilder := rshandlers.OptionsBuilder{
+		Client: k8s,
+		Logger: logger,
 	}
-	if err := k8s.Get(ctx, keys[0], aodc, &client.GetOptions{}); err != nil {
-		// TODO(JoaoBraveCoding) Add proper error handling
-		return aodc, err
+	rsOpts, err := rsOptsBuilder.Build(ctx, cluster, opts)
+	if err != nil {
+		return nil, err
 	}
-	return aodc, nil
-}
 
-func isHubCluster(cluster *clusterv1.ManagedCluster) bool {
-	return cluster.Labels[clusterlifecycleconstants.SelfManagedClusterLabelKey] == "true"
-}
-
-func supportedKubeVendors(cluster *clusterv1.ManagedCluster) bool {
-	return cluster.Labels[clusterinfov1beta1.LabelKubeVendor] == string(clusterinfov1beta1.KubeVendorOpenShift)
+	return rshandlers.BuildValues(rsOpts)
 }

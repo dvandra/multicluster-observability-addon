@@ -10,6 +10,7 @@ import (
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	"github.com/stolostron/multicluster-observability-addon/internal/coo/manifests"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -32,7 +33,7 @@ func TestInstallCOO(t *testing.T) {
 			isHub:                   false,
 			options:                 addon.Options{},
 			expectedUIPluginInstall: false,
-			expectedCOOInstall:      true,
+			expectedCOOInstall:      false,
 		},
 		{
 			name:  "Non-hub cluster with incident detection enabled",
@@ -71,7 +72,7 @@ func TestInstallCOO(t *testing.T) {
 			isHub:                   true,
 			options:                 addon.Options{},
 			expectedUIPluginInstall: false,
-			expectedCOOInstall:      true,
+			expectedCOOInstall:      false,
 		},
 		{
 			name:  "Hub cluster with COO installed and incident detection enabled",
@@ -163,8 +164,8 @@ func TestInstallCOO(t *testing.T) {
 					},
 				},
 			},
-			expectedUIPluginInstall: true,
-			expectedCOOInstall:      true,
+			expectedUIPluginInstall: false,
+			expectedCOOInstall:      false,
 		},
 	}
 
@@ -177,14 +178,14 @@ func TestInstallCOO(t *testing.T) {
 				k8sClientBuilder = k8sClientBuilder.WithObjects(tc.subscription)
 			}
 
-			result, err := InstallCOO(context.Background(), k8sClientBuilder.Build(), logr.Discard(), tc.isHub)
+			result, err := InstallOfCOOOnTheHubIsNeeded(context.Background(), k8sClientBuilder.Build(), logr.Discard(), tc.isHub)
 			cooValues := manifests.BuildValues(tc.options, result, tc.isHub)
 
 			if tc.expectedErrMsg != "" {
 				assert.EqualError(t, err, tc.expectedErrMsg)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tc.expectedUIPluginInstall, cooValues.Enabled)
 			assert.Equal(t, tc.expectedCOOInstall, cooValues.InstallCOO)
 		})

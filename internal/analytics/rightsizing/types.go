@@ -1,0 +1,67 @@
+package rightsizing
+
+import (
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
+)
+
+// RS resource labels — must match MCO's rsutility.RSLabels() so that MCO can
+// discover and manage these resources during mode switches and cleanup.
+// In the future when only MCOA mode is supported, these can use MCOA-specific labels.
+const (
+	RSManagedByLabel = "observability.open-cluster-management.io/managed-by"
+	RSManagedByValue = "analytics-rightsizing"
+)
+
+// RSLabels returns the standard labels applied to all right-sizing hub resources.
+func RSLabels() map[string]string {
+	return map[string]string{RSManagedByLabel: RSManagedByValue}
+}
+
+// Common constants
+const (
+	DefaultRecommendationPercentage = 110
+	MonitoringNamespace             = "openshift-monitoring"
+
+	// Namespace right-sizing constants
+	NamespacePrometheusRuleName = "acm-rs-namespace-prometheus-rules"
+	NamespaceConfigMapName      = "rs-namespace-config"
+
+	// Virtualization right-sizing constants
+	VirtualizationPrometheusRuleName = "acm-rs-virt-prometheus-rules"
+	VirtualizationConfigMapName      = "rs-virt-config"
+
+	// Workload-pod right-sizing constants
+	WorkloadPrometheusRuleName = "acm-rs-workload-prometheus-rules"
+	WorkloadConfigMapName      = "rs-workload-config"
+
+	// GPU right-sizing constants
+	GPUPrometheusRuleName = "acm-rs-gpu-prometheus-rules"
+	GPUConfigMapName      = "rs-gpu-config"
+
+	// Prediction engine hub resources (ConfigMap names; model state is sharded as rs-prediction-model-state-<n>)
+	RSPredictionConfigMapName    = "rs-prediction-config"
+	RSPredictionModelStatePrefix = "rs-prediction-model-state"
+)
+
+// RSLabelFilter represents label filtering criteria for right-sizing
+type RSLabelFilter struct {
+	LabelName         string   `json:"labelName"`
+	InclusionCriteria []string `json:"inclusionCriteria,omitempty"`
+	ExclusionCriteria []string `json:"exclusionCriteria,omitempty"`
+}
+
+// RSPrometheusRuleConfig represents the Prometheus rule configuration for right-sizing
+type RSPrometheusRuleConfig struct {
+	NamespaceFilterCriteria struct {
+		InclusionCriteria []string `json:"inclusionCriteria"`
+		ExclusionCriteria []string `json:"exclusionCriteria"`
+	} `json:"namespaceFilterCriteria"`
+	LabelFilterCriteria      []RSLabelFilter `json:"labelFilterCriteria"`
+	RecommendationPercentage int             `json:"recommendationPercentage"`
+}
+
+// RSConfigMapData represents the configmap data structure for right-sizing
+type RSConfigMapData struct {
+	PrometheusRuleConfig   RSPrometheusRuleConfig   `json:"prometheusRuleConfig"`
+	PlacementConfiguration clusterv1beta1.Placement `json:"placementConfiguration"`
+}

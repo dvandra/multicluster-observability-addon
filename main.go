@@ -4,23 +4,26 @@ import (
 	"context"
 	goflag "flag"
 	"fmt"
-	"math/rand"
 	"os"
-	"time"
+	"path/filepath"
 
 	"github.com/ViaQ/logerr/v2/log"
 	otelv1alpha1 "github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
 	otelv1beta1 "github.com/open-telemetry/opentelemetry-operator/apis/v1beta1"
+	operatorv1 "github.com/openshift/api/operator/v1"
+	routev1 "github.com/openshift/api/route/v1"
 	loggingv1 "github.com/openshift/cluster-logging-operator/api/observability/v1"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	persesv1 "github.com/perses/perses-operator/api/v1alpha1"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusv1alpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	uiplugin "github.com/rhobs/observability-operator/pkg/apis/uiplugin/v1alpha1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/stolostron/multicluster-observability-addon/internal/analytics/rightsizing/prediction/training"
 	addonctrl "github.com/stolostron/multicluster-observability-addon/internal/controllers/addon"
 	"github.com/stolostron/multicluster-observability-addon/internal/controllers/resourcecreator"
 	"github.com/stolostron/multicluster-observability-addon/internal/controllers/watcher"
@@ -34,6 +37,7 @@ import (
 	"open-cluster-management.io/addon-framework/pkg/version"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -50,24 +54,31 @@ func init() {
 	utilruntime.Must(operatorsv1.AddToScheme(scheme))
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
-	utilruntime.Must(prometheusv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(prometheusv1.AddToScheme(scheme))
+	utilruntime.Must(clusterv1beta1.AddToScheme(scheme))
+	utilruntime.Must(operatorv1.AddToScheme(scheme))
+	utilruntime.Must(cooprometheusv1.AddToScheme(scheme))
+	utilruntime.Must(cooprometheusv1alpha1.AddToScheme(scheme)) // Adds prometheusAgent and scrapeConfig
+	utilruntime.Must(prometheusv1.AddToScheme(scheme))          // Adds prometheusRule
 	utilruntime.Must(uiplugin.AddToScheme(scheme))
 	utilruntime.Must(hyperv1.AddToScheme(scheme))
 	utilruntime.Must(persesv1.AddToScheme(scheme))
-
+	utilruntime.Must(routev1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
 var logVerbosity int
 
 func main() {
-	rand.Seed(time.Now().UTC().UnixNano()) // nolint:staticcheck
-
 	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 
 	logs.AddFlags(logs.NewLoggingConfiguration(), pflag.CommandLine)
+
+	// Spoke ManifestWork runs `command: [endpoint-monitoring-operator]` with no args, matching
+	// the legacy operator binary. Default to the controller subcommand in that case only.
+	if filepath.Base(os.Args[0]) == "endpoint-monitoring-operator" && len(os.Args) == 1 {
+		os.Args = append(os.Args, "controller")
+	}
 
 	command := newCommand()
 	if err := command.Execute(); err != nil {
@@ -114,6 +125,10 @@ func runControllers(ctx context.Context, kubeConfig *rest.Config) error {
 	logger := log.NewLogger("mcoa", log.WithVerbosity(logVerbosity))
 	ctrl.SetLogger(logger)
 
+	// Increase client-side throttling limits to support large number of managed clusters
+	kubeConfig.QPS = 50.0
+	kubeConfig.Burst = 100
+
 	mgr, err := addonctrl.NewAddonManager(ctx, kubeConfig, scheme, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create addon manager: %w", err)
@@ -136,6 +151,8 @@ func runControllers(ctx context.Context, kubeConfig *rest.Config) error {
 		return fmt.Errorf("unable to create resource creator manager: %w", err)
 	}
 	rcm.Start(ctx)
+
+	training.StartHubControllerIfEnabled(ctx, kubeConfig, scheme, logger)
 
 	err = mgr.Start(ctx)
 	if err != nil {

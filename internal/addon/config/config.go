@@ -2,12 +2,16 @@ package config
 
 import (
 	"errors"
+	"time"
 )
 
 const (
-	Name              = "multicluster-observability-addon"
-	LabelOCMAddonName = "open-cluster-management.io/addon-name"
-	InstallNamespace  = "open-cluster-management-observability"
+	Name               = "multicluster-observability-addon"
+	LabelOCMAddonName  = "open-cluster-management.io/addon-name"
+	InstallNamespace   = "open-cluster-management-observability"
+	AnalyticsNamespace = "observability-analytics"
+
+	DefaultContextTimeout = 10 * time.Second
 
 	McoaChartDir    = "manifests/charts/mcoa"
 	MetricsChartDir = "manifests/charts/mcoa/charts/metrics"
@@ -43,19 +47,38 @@ const (
 	UipProbeKey       = "isAvailable"
 	UipProbePath      = ".status.conditions[?(@.type==\"Available\")].status"
 
-	DefaultStackPrefix            = "default-stack-instance"
+	DefaultStackPrefix = "mcoa-default"
+
+	// Label keys
 	PlacementRefNameLabelKey      = "placement-ref-name"
 	PlacementRefNamespaceLabelKey = "placement-ref-namespace"
+	ComponentK8sLabelKey          = "app.kubernetes.io/component"
+	ManagedByK8sLabelKey          = "app.kubernetes.io/managed-by"
+	PartOfK8sLabelKey             = "app.kubernetes.io/part-of"
+	BackupLabelKey                = "cluster.open-cluster-management.io/backup"
+	BackupLabelValue              = ""
 
 	ClusterClaimClusterID        = "id.k8s.io"
 	ManagedClusterLabelClusterID = "clusterID"
 
-	ComponentK8sLabelKey = "app.kubernetes.io/component"
-	ManagedByK8sLabelKey = "app.kubernetes.io/managed-by"
-	PartOfK8sLabelKey    = "app.kubernetes.io/part-of"
+	// Feedback rule names
+	IsEstablishedFeedbackName             = "isEstablished"
+	IsEstablishedFeedbackPath             = ".status.conditions[?(@.type==\"Established\")].status"
+	PrometheusOperatorVersionFeedbackName = "prometheusOperatorVersion"
+	PrometheusOperatorVersionFeedbackPath = `.metadata.annotations.operator\.prometheus\.io/version`
+	LastTransitionTimeFeedbackName        = "lastTransitionTime"
+	LastTransitionTimeFeedbackPath        = ".status.conditions[?(@.type==\"Established\")].lastTransitionTime"
+	IsOLMManagedFeedbackName              = "isOLMManaged"
+	IsOLMManagedFeedbackPath              = `.metadata.labels.olm\.managed`
+
+	VendorOverrideAnnotationKey = "mcoa-override-vendor"
+	AnnotationOriginalResource  = "mcoa.openshift.io/original-resource"
 )
 
 var (
-	ErrInvalidMetricsHubHostname  = errors.New("invalid metrics hub hostname")
-	ErrInvalidSubscriptionChannel = errors.New("current version of the cluster-observability-operator installed doesn't match the supported MCOA version")
+	ErrInvalidMetricsHubHostname          = errors.New("invalid metrics hub hostname")
+	ErrInvalidMetricsAlertManagerHostname = errors.New("invalid metrics alert manager hostname")
+	ErrInvalidProxyURL                    = errors.New("invalid proxy URL")
+	ErrInvalidSubscriptionChannel         = errors.New("current version of the cluster-observability-operator installed doesn't match the supported MCOA version")
+	ErrInvalidPort                        = errors.New("invalid port")
 )

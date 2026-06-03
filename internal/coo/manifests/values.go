@@ -4,15 +4,19 @@ import (
 	"encoding/json"
 	"log"
 
-	persesv1 "github.com/perses/perses-operator/api/v1alpha1"
 	"github.com/perses/perses/go-sdk/dashboard"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon"
 	"github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	imanifests "github.com/stolostron/multicluster-observability-addon/internal/analytics/incident-detection/manifests"
-	mmanifests "github.com/stolostron/multicluster-observability-addon/internal/metrics/manifests"
 	"github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm"
+	hcp "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/hosted-control-plane"
+	apiserver "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/k8s/apiserver"
+	compute "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/k8s/compute"
+	etcd "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/k8s/etcd"
+	networking "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/k8s/networking"
+	slo "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/acm/k8s/slo"
 	incident_management "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/incident-management"
-	"k8s.io/apimachinery/pkg/runtime"
+	rsperses "github.com/stolostron/multicluster-observability-addon/internal/perses/dashboards/rightsizing"
 )
 
 var (
@@ -33,23 +37,31 @@ type DashboardBuilder struct {
 }
 
 type COOValues struct {
-	Enabled            bool                                `json:"enabled"`
-	InstallCOO         bool                                `json:"installCOO"`
-	MonitoringUIPlugin bool                                `json:"monitoringUIPlugin"`
-	Perses             bool                                `json:"perses"`
-	Dashboards         []DashboardValue                    `json:"dashboards,omitempty"`
-	Metrics            *mmanifests.UIValues                `json:"metrics,omitempty"`
-	IncidentDetection  *imanifests.IncidentDetectionValues `json:"incidentDetection,omitempty"`
+	Enabled            bool `json:"enabled"`
+	InstallCOO         bool `json:"installCOO"`
+	MonitoringUIPlugin bool `json:"monitoringUIPlugin"`
+	Perses             bool `json:"perses"`
+	// omitempty removed: when no regular dashboards are needed, the key must
+	// still appear in the serialized JSON so Helm uses the empty list instead
+	// of falling back to the default in values.yaml.
+	Dashboards          []DashboardValue                    `json:"dashboards"`
+	AnalyticsDashboards []DashboardValue                    `json:"analyticsDashboards,omitempty"`
+	Metrics             *UIValues                           `json:"metrics,omitempty"`
+	IncidentDetection   *imanifests.IncidentDetectionValues `json:"incidentDetection,omitempty"`
 }
 
-func BuildValues(opts addon.Options, installCOO bool, isHubCluster bool) *COOValues {
+type UIValues struct {
+	Enabled bool `json:"enabled"`
+}
+
+func BuildValues(opts addon.Options, installOfCOOOnTheHubIsNeeded bool, isHubCluster bool) *COOValues {
 	var dashboards []DashboardValue
 	var incidentDetectionEnabled bool
-	metricsUI := mmanifests.EnableUI(opts.Platform.Metrics, isHubCluster)
+	var rightSizingEnabled bool
+	metricsUI := enableUI(opts.Platform.Metrics, isHubCluster)
 	if metricsUI != nil {
 		if metricsUI.Enabled {
 			dashboards = append(dashboards, buildACMDashboards()...)
-			dashboards = append(dashboards, buildK8sDashboards()...)
 		}
 	}
 
@@ -57,30 +69,66 @@ func BuildValues(opts addon.Options, installCOO bool, isHubCluster bool) *COOVal
 	if incidentDetection != nil {
 		if incidentDetection.Enabled {
 			incidentDetectionEnabled = true
-			if isHubCluster {
-				dashboards = append(dashboards, buildIncidentDetetctionDashboards()...)
-			}
+		}
+	}
+
+	var analyticsDashboards []DashboardValue
+	if isHubCluster {
+		if incidentDetectionEnabled {
+			analyticsDashboards = append(analyticsDashboards, buildIncidentDetetctionDashboards()...)
+		}
+		if opts.Platform.AnalyticsOptions.RightSizing.NamespaceEnabled ||
+			opts.Platform.AnalyticsOptions.RightSizing.PredictionEnabled {
+			rightSizingEnabled = true
+			analyticsDashboards = append(analyticsDashboards, buildNamespaceRSDashboards()...)
+			analyticsDashboards = append(analyticsDashboards, buildForecastingDashboards()...)
+		}
+		if opts.Platform.AnalyticsOptions.RightSizing.VirtualizationEnabled {
+			rightSizingEnabled = true
+			analyticsDashboards = append(analyticsDashboards, buildVMRSDashboards()...)
+		}
+	}
+
+	var installCOO bool
+	if (metricsUI != nil && metricsUI.Enabled) || incidentDetectionEnabled || rightSizingEnabled {
+		if isHubCluster {
+			installCOO = installOfCOOOnTheHubIsNeeded
+		} else {
+			installCOO = true
 		}
 	}
 
 	return &COOValues{
-		// Decide if this chart is needed
-		Enabled: len(dashboards) > 0 || incidentDetectionEnabled,
-		// Decide if COO chart is needs to be installed
-		InstallCOO:         installCOO,
-		MonitoringUIPlugin: len(dashboards) > 0 || incidentDetectionEnabled,
-		Perses:             len(dashboards) > 0,
-		Dashboards:         dashboards,
-		Metrics:            metricsUI,
-		IncidentDetection:  incidentDetection,
+		Enabled:             len(dashboards) > 0 || len(analyticsDashboards) > 0 || incidentDetectionEnabled,
+		InstallCOO:          installCOO,
+		MonitoringUIPlugin:  len(dashboards) > 0 || len(analyticsDashboards) > 0 || incidentDetectionEnabled,
+		Perses:              len(dashboards) > 0 || len(analyticsDashboards) > 0,
+		Dashboards:          dashboards,
+		AnalyticsDashboards: analyticsDashboards,
+		Metrics:             metricsUI,
+		IncidentDetection:   incidentDetection,
 	}
 }
 
-func buildDashboards(builders []DashboardBuilder, datasource string) []DashboardValue {
+func enableUI(opts addon.MetricsOptions, isHub bool) *UIValues {
+	if !isHub {
+		return nil
+	}
+
+	if !opts.CollectionEnabled || !opts.UI.Enabled {
+		return nil
+	}
+
+	return &UIValues{
+		Enabled: true,
+	}
+}
+
+func buildDashboards(builders []DashboardBuilder, datasource string, project string) []DashboardValue {
 	var dashboards []DashboardValue
 
 	for _, builder := range builders {
-		db, err := builder.fn(config.InstallNamespace, datasource, clusterLabelName)
+		db, err := builder.fn(project, datasource, clusterLabelName)
 		if err != nil {
 			log.Printf("Failed to build %s dashboard: %v", builder.name, err)
 			continue
@@ -108,9 +156,25 @@ func buildACMDashboards() []DashboardValue {
 		{acm.BuildACMAlertAnalysis, "ACMAlertAnalysis"},
 		{acm.BuildACMAlertsByCluster, "ACMAlertsByCluster"},
 		{acm.BuildACMClustersByAlert, "ACMClustersByAlert"},
+		{hcp.BuildACMHCPOverview, "ACMHCPOverview"},
+		{hcp.BuildACMHCPResources, "ACMHCPResources"},
+		{apiserver.BuildAPIServerOverview, "APIServerOverview"},
+		{etcd.BuildETCDOverview, "ETCDOverview"},
+		{slo.BuildSLOAPIServer, "SLOAPIServer"},
+		{slo.BuildSLOAPIServerCluster, "SLOAPIServerCluster"},
+		{networking.BuildNetworkingCluster, "NetworkingCluster"},
+		{networking.BuildNetworkingNamespacePods, "NetworkingNamespacePods"},
+		{networking.BuildNetworkingNode, "NetworkingNode"},
+		{networking.BuildNetworkingPod, "NetworkingPod"},
+		{compute.BuildComputeCluster, "ComputeCluster"},
+		{compute.BuildComputeNamespacePods, "ComputeNamespacePods"},
+		{compute.BuildComputeNamespaceWorkloads, "ComputeNamespaceWorkloads"},
+		{compute.BuildComputeNodePods, "ComputeNodePods"},
+		{compute.BuildComputePod, "ComputePod"},
+		{compute.BuildComputeWorkload, "ComputeWorkload"},
 	}
 
-	return buildDashboards(builders, dsThanos)
+	return buildDashboards(builders, dsThanos, config.InstallNamespace)
 }
 
 func buildIncidentDetetctionDashboards() []DashboardValue {
@@ -118,42 +182,33 @@ func buildIncidentDetetctionDashboards() []DashboardValue {
 		{incident_management.BuildACMIncidentsOverview, "IncidentDetectionOverview"},
 	}
 
-	return buildDashboards(builders, dsThanos)
+	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)
 }
 
-func buildK8sDashboards() []DashboardValue {
-	type dashboardBuilder struct {
-		fn   func(string, string, string) ([]runtime.Object, error)
-		name string
-	}
-	builders := []dashboardBuilder{
-		{acm.BuildK8sDashboards, "Kubernetes"},
-		{acm.BuildETCDDashboards, "ETCD"},
+func buildNamespaceRSDashboards() []DashboardValue {
+	builders := []DashboardBuilder{
+		{func(project, datasource, clusterLabelName string) (dashboard.Builder, error) {
+			return rsperses.BuildNamespaceRightSizing(project, datasource, clusterLabelName)
+		}, "NamespaceRightSizing"},
 	}
 
-	var dashboards []DashboardValue
-	for _, builder := range builders {
-		objs, err := builder.fn(config.InstallNamespace, dsThanos, clusterLabelName)
-		if err != nil {
-			log.Printf("Failed to build %s dashboards: %v", builder.name, err)
-			continue
-		}
-		for _, obj := range objs {
-			db, ok := obj.(*persesv1.PersesDashboard)
-			if !ok {
-				log.Printf("Failed to convert object to PersesDashboard: %v", obj)
-				continue
-			}
-			data, err := json.Marshal(db.Spec)
-			if err != nil {
-				log.Printf("Failed to marshal %s dashboard: %v", builder.name, err)
-				continue
-			}
-			dashboards = append(dashboards, DashboardValue{
-				Name: db.Name,
-				Data: string(data),
-			})
-		}
+	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)
+}
+
+func buildForecastingDashboards() []DashboardValue {
+	builders := []DashboardBuilder{
+		{rsperses.BuildForecasting, "Forecasting"},
 	}
-	return dashboards
+
+	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)
+}
+
+func buildVMRSDashboards() []DashboardValue {
+	builders := []DashboardBuilder{
+		{rsperses.BuildVMOverview, "VMRightSizingOverview"},
+		{rsperses.BuildVMOverestimation, "VMOverestimation"},
+		{rsperses.BuildVMUnderestimation, "VMUnderestimation"},
+	}
+
+	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)
 }

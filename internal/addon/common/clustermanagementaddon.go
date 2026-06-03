@@ -8,7 +8,8 @@ import (
 
 	"github.com/go-logr/logr"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusv1alpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,9 +113,11 @@ func ensureConfigsInAddon(cmao *addonv1alpha1.ClusterManagementAddOn, configs []
 }
 
 func ObjectToAddonConfig(obj client.Object) (addonv1alpha1.AddOnConfig, error) {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+
 	ret := addonv1alpha1.AddOnConfig{
 		ConfigGroupResource: addonv1alpha1.ConfigGroupResource{
-			Group: obj.GetObjectKind().GroupVersionKind().Group,
+			Group: gvk.Group,
 		},
 		ConfigReferent: addonv1alpha1.ConfigReferent{
 			Namespace: obj.GetNamespace(),
@@ -122,13 +125,18 @@ func ObjectToAddonConfig(obj client.Object) (addonv1alpha1.AddOnConfig, error) {
 		},
 	}
 
-	switch obj.GetObjectKind().GroupVersionKind().Kind {
-	case prometheusv1alpha1.ScrapeConfigsKind:
-		ret.Resource = prometheusv1alpha1.ScrapeConfigName
+	switch gvk.Kind {
+	case cooprometheusv1alpha1.ScrapeConfigsKind:
+		ret.Resource = cooprometheusv1alpha1.ScrapeConfigName
 	case prometheusv1.PrometheusRuleKind:
-		ret.Resource = prometheusv1.PrometheusRuleName
-	case prometheusv1alpha1.PrometheusAgentsKind:
-		ret.Resource = prometheusv1alpha1.PrometheusAgentName
+		switch gvk.Group {
+		case cooprometheusv1.SchemeGroupVersion.Group:
+			ret.Resource = cooprometheusv1.PrometheusRuleName
+		default:
+			ret.Resource = prometheusv1.PrometheusRuleName
+		}
+	case cooprometheusv1alpha1.PrometheusAgentsKind:
+		ret.Resource = cooprometheusv1alpha1.PrometheusAgentName
 	default:
 		return ret, fmt.Errorf("%w: %s %s/%s", errUnsupportedKind, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName())
 	}

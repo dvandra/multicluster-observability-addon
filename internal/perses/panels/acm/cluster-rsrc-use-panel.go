@@ -1,8 +1,8 @@
 package acm
 
 import (
-	"github.com/perses/community-dashboards/pkg/dashboards"
-	"github.com/perses/community-dashboards/pkg/promql"
+	"github.com/perses/community-mixins/pkg/dashboards"
+	"github.com/perses/community-mixins/pkg/promql"
 	commonSdk "github.com/perses/perses/go-sdk/common"
 	"github.com/perses/perses/go-sdk/panel"
 	panelgroup "github.com/perses/perses/go-sdk/panel-group"
@@ -16,7 +16,7 @@ func CPUUtilization(datasourceName string, labelMatchers ...promql.LabelMatcher)
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -30,16 +30,16 @@ func CPUUtilization(datasourceName string, labelMatchers ...promql.LabelMatcher)
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
 			query.PromQL(
 				promql.SetLabelMatchers(
-					//nolint:misspell
 					"(instance:node_cpu_utilisation:rate1m{cluster=\"$cluster\",job=\"node-exporter\"} * instance:node_num_cpu:sum{cluster=\"$cluster\",job=\"node-exporter\"}) / scalar(sum(instance:node_num_cpu:sum{cluster=\"$cluster\",job=\"node-exporter\"}))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -52,7 +52,7 @@ func CPUSaturation(datasourceName string, labelMatchers ...promql.LabelMatcher) 
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -66,7 +66,7 @@ func CPUSaturation(datasourceName string, labelMatchers ...promql.LabelMatcher) 
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -75,6 +75,7 @@ func CPUSaturation(datasourceName string, labelMatchers ...promql.LabelMatcher) 
 					"instance:node_load1_per_cpu:ratio{cluster=\"$cluster\",job=\"node-exporter\"} / scalar(count(instance:node_load1_per_cpu:ratio{cluster=\"$cluster\",job=\"node-exporter\"}))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -87,7 +88,7 @@ func MemoryUtilization(datasourceName string, labelMatchers ...promql.LabelMatch
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -101,16 +102,16 @@ func MemoryUtilization(datasourceName string, labelMatchers ...promql.LabelMatch
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
 			query.PromQL(
 				promql.SetLabelMatchers(
-					//nolint:misspell
 					"instance:node_memory_utilisation:ratio{cluster=\"$cluster\",job=\"node-exporter\"} / scalar(count(instance:node_memory_utilisation:ratio{cluster=\"$cluster\",job=\"node-exporter\"}))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -123,7 +124,7 @@ func MemorySaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -137,7 +138,7 @@ func MemorySaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -146,6 +147,7 @@ func MemorySaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 					"instance:node_vmstat_pgmajfault:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -158,7 +160,7 @@ func NetworkUtilization(datasourceName string, labelMatchers ...promql.LabelMatc
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.BytesPerSecondsUnit),
+					Unit: &dashboards.BytesPerSecondsUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -172,7 +174,7 @@ func NetworkUtilization(datasourceName string, labelMatchers ...promql.LabelMatc
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -181,6 +183,7 @@ func NetworkUtilization(datasourceName string, labelMatchers ...promql.LabelMatc
 					"instance:node_network_receive_bytes_excluding_lo:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} Receive"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -190,6 +193,7 @@ func NetworkUtilization(datasourceName string, labelMatchers ...promql.LabelMatc
 					"instance:node_network_transmit_bytes_excluding_lo:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} Transmit"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -202,7 +206,7 @@ func NetworkSaturation(datasourceName string, labelMatchers ...promql.LabelMatch
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.BytesPerSecondsUnit),
+					Unit: &dashboards.BytesPerSecondsUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -216,7 +220,7 @@ func NetworkSaturation(datasourceName string, labelMatchers ...promql.LabelMatch
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -225,6 +229,7 @@ func NetworkSaturation(datasourceName string, labelMatchers ...promql.LabelMatch
 					"instance:node_network_receive_drop_excluding_lo:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} Receive"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -234,6 +239,7 @@ func NetworkSaturation(datasourceName string, labelMatchers ...promql.LabelMatch
 					"instance:node_network_transmit_drop_excluding_lo:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} Transmit"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -246,7 +252,7 @@ func DiskIOUtilization(datasourceName string, labelMatchers ...promql.LabelMatch
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -260,7 +266,7 @@ func DiskIOUtilization(datasourceName string, labelMatchers ...promql.LabelMatch
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -269,6 +275,7 @@ func DiskIOUtilization(datasourceName string, labelMatchers ...promql.LabelMatch
 					"instance_device:node_disk_io_time_seconds:rate1m{cluster=\"$cluster\",job=\"node-exporter\"} / scalar(count(instance_device:node_disk_io_time_seconds:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} {{ device }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -281,7 +288,7 @@ func DiskIOSaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -295,7 +302,7 @@ func DiskIOSaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -304,6 +311,7 @@ func DiskIOSaturation(datasourceName string, labelMatchers ...promql.LabelMatche
 					"instance_device:node_disk_io_time_weighted_seconds:rate1m{cluster=\"$cluster\",job=\"node-exporter\"} / scalar(count(instance_device:node_disk_io_time_weighted_seconds:rate1m{cluster=\"$cluster\",job=\"node-exporter\"}))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }} {{ device }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),
@@ -316,7 +324,7 @@ func DiskSpaceUtilization(datasourceName string, labelMatchers ...promql.LabelMa
 		timeSeriesPanel.Chart(
 			timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 				Format: &commonSdk.Format{
-					Unit: string(commonSdk.PercentDecimalUnit),
+					Unit: &dashboards.PercentDecimalUnit,
 				},
 			}),
 			timeSeriesPanel.WithLegend(timeSeriesPanel.Legend{
@@ -330,7 +338,7 @@ func DiskSpaceUtilization(datasourceName string, labelMatchers ...promql.LabelMa
 				LineWidth:    0.25,
 				AreaOpacity:  1,
 				Stack:        timeSeriesPanel.AllStack,
-				Palette:      timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
+				Palette:      &timeSeriesPanel.Palette{Mode: timeSeriesPanel.AutoMode},
 			}),
 		),
 		panel.AddQuery(
@@ -339,6 +347,7 @@ func DiskSpaceUtilization(datasourceName string, labelMatchers ...promql.LabelMa
 					"sum without (device) (max without (fstype, mountpoint) (node_filesystem_size_bytes{cluster=\"$cluster\",job=\"node-exporter\", fstype!=\"\"} - node_filesystem_avail_bytes{cluster=\"$cluster\",job=\"node-exporter\", fstype!=\"\"})) / scalar(sum(max without (fstype, mountpoint) (node_filesystem_size_bytes{cluster=\"$cluster\",job=\"node-exporter\", fstype!=\"\"})))",
 					labelMatchers,
 				),
+				query.SeriesNameFormat("{{ instance }}"),
 				dashboards.AddQueryDataSource(datasourceName),
 			),
 		),

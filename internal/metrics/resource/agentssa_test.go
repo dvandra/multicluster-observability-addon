@@ -4,8 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	prometheusalpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	cooprometheusv1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1"
+	cooprometheusv1alpha1 "github.com/rhobs/obo-prometheus-operator/pkg/apis/monitoring/v1alpha1"
+	addoncfg "github.com/stolostron/multicluster-observability-addon/internal/addon/config"
 	"github.com/stolostron/multicluster-observability-addon/internal/metrics/config"
 	"github.com/stolostron/multicluster-observability-addon/internal/metrics/resource"
 	"github.com/stretchr/testify/assert"
@@ -16,22 +17,23 @@ import (
 func TestPrometheusAgentSSA(t *testing.T) {
 	testCases := []struct {
 		Name          string
-		ExistingAgent *prometheusalpha1.PrometheusAgent
+		ExistingAgent *cooprometheusv1alpha1.PrometheusAgent
 		Labels        map[string]string
-		Expect        func(*testing.T, *prometheusalpha1.PrometheusAgent)
+		Expect        func(*testing.T, *cooprometheusv1alpha1.PrometheusAgent)
 	}{
 		{
 			Name: "mandatory fields are set",
-			ExistingAgent: &prometheusalpha1.PrometheusAgent{
+			ExistingAgent: &cooprometheusv1alpha1.PrometheusAgent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "test",
 				},
-				Spec: prometheusalpha1.PrometheusAgentSpec{},
+				Spec: cooprometheusv1alpha1.PrometheusAgentSpec{},
 			},
-			Expect: func(t *testing.T, agent *prometheusalpha1.PrometheusAgent) {
+			Expect: func(t *testing.T, agent *cooprometheusv1alpha1.PrometheusAgent) {
 				assert.NotEmpty(t, agent.Spec.ServiceAccountName)
-				assert.NotEmpty(t, agent.Spec.Image)
+				assert.Empty(t, agent.Spec.Image)                                         // is set by the obo-prometheus operator
+				assert.Equal(t, "kube-rbac-proxy:latest", agent.Spec.Containers[0].Image) // kube-rbac-proxy image
 				assert.NotEmpty(t, agent.Spec.RemoteWrite)
 				assert.NotEmpty(t, agent.Spec.RemoteWrite[0].URL)
 			},
@@ -41,30 +43,44 @@ func TestPrometheusAgentSSA(t *testing.T) {
 			Labels: map[string]string{
 				"placement": "a",
 			},
-			ExistingAgent: &prometheusalpha1.PrometheusAgent{
+			ExistingAgent: &cooprometheusv1alpha1.PrometheusAgent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "test",
 					Labels:    map[string]string{"dummy": "dummy"},
 				},
-				Spec: prometheusalpha1.PrometheusAgentSpec{},
+				Spec: cooprometheusv1alpha1.PrometheusAgentSpec{},
 			},
-			Expect: func(t *testing.T, agent *prometheusalpha1.PrometheusAgent) {
+			Expect: func(t *testing.T, agent *cooprometheusv1alpha1.PrometheusAgent) {
 				assert.NotEmpty(t, agent.Labels["dummy"])
 				assert.NotEmpty(t, agent.Labels["placement"])
 			},
 		},
 		{
+			Name: "backup label is added",
+			ExistingAgent: &cooprometheusv1alpha1.PrometheusAgent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: config.HubInstallNamespace,
+				},
+				Spec: cooprometheusv1alpha1.PrometheusAgentSpec{},
+			},
+			Expect: func(t *testing.T, agent *cooprometheusv1alpha1.PrometheusAgent) {
+				assert.Contains(t, agent.Labels, addoncfg.BackupLabelKey, "backup label key should be present")
+				assert.Equal(t, addoncfg.BackupLabelValue, agent.Labels[addoncfg.BackupLabelKey])
+			},
+		},
+		{
 			Name: "remote write config is set",
-			ExistingAgent: &prometheusalpha1.PrometheusAgent{
+			ExistingAgent: &cooprometheusv1alpha1.PrometheusAgent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "test",
 				},
-				Spec: prometheusalpha1.PrometheusAgentSpec{
-					CommonPrometheusFields: prometheusv1.CommonPrometheusFields{
+				Spec: cooprometheusv1alpha1.PrometheusAgentSpec{
+					CommonPrometheusFields: cooprometheusv1.CommonPrometheusFields{
 						Secrets: []string{"test", config.HubCASecretName},
-						RemoteWrite: []prometheusv1.RemoteWriteSpec{
+						RemoteWrite: []cooprometheusv1.RemoteWriteSpec{
 							{
 								Name: ptr.To("custom"),
 							},
@@ -74,7 +90,7 @@ func TestPrometheusAgentSSA(t *testing.T) {
 							{
 								Name: ptr.To(config.RemoteWriteCfgName),
 								URL:  "another",
-								QueueConfig: &prometheusv1.QueueConfig{
+								QueueConfig: &cooprometheusv1.QueueConfig{
 									Capacity: 1,
 								},
 							},
@@ -82,7 +98,7 @@ func TestPrometheusAgentSSA(t *testing.T) {
 					},
 				},
 			},
-			Expect: func(t *testing.T, agent *prometheusalpha1.PrometheusAgent) {
+			Expect: func(t *testing.T, agent *cooprometheusv1alpha1.PrometheusAgent) {
 				// Ensure user secrets are kept, and remote write ones are set
 				assert.Contains(t, agent.Spec.Secrets, "test")
 				assert.Contains(t, agent.Spec.Secrets, config.HubCASecretName)
@@ -91,7 +107,7 @@ func TestPrometheusAgentSSA(t *testing.T) {
 				// Ensure that user custom remote write configs are kept
 				assert.Len(t, agent.Spec.RemoteWrite, 3)
 				// Ensure that user custom queue config is maintained and required fields are enforced
-				index := slices.IndexFunc(agent.Spec.RemoteWrite, func(e prometheusv1.RemoteWriteSpec) bool {
+				index := slices.IndexFunc(agent.Spec.RemoteWrite, func(e cooprometheusv1.RemoteWriteSpec) bool {
 					return e.Name != nil && *e.Name == config.RemoteWriteCfgName
 				})
 				assert.Equal(t, 1, agent.Spec.RemoteWrite[index].QueueConfig.Capacity)
@@ -101,24 +117,24 @@ func TestPrometheusAgentSSA(t *testing.T) {
 		},
 		{
 			Name: "scrapeClasses are set",
-			ExistingAgent: &prometheusalpha1.PrometheusAgent{
+			ExistingAgent: &cooprometheusv1alpha1.PrometheusAgent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "test",
 				},
-				Spec: prometheusalpha1.PrometheusAgentSpec{
-					CommonPrometheusFields: prometheusv1.CommonPrometheusFields{
+				Spec: cooprometheusv1alpha1.PrometheusAgentSpec{
+					CommonPrometheusFields: cooprometheusv1.CommonPrometheusFields{
 						ConfigMaps: []string{"cm"},
-						ScrapeClasses: []prometheusv1.ScrapeClass{
+						ScrapeClasses: []cooprometheusv1.ScrapeClass{
 							{
 								Name: "one",
 							},
 							{
 								Name: config.ScrapeClassCfgName,
-								Authorization: &prometheusv1.Authorization{
+								Authorization: &cooprometheusv1.Authorization{
 									CredentialsFile: "dummy",
 								},
-								MetricRelabelings: []prometheusv1.RelabelConfig{
+								MetricRelabelings: []cooprometheusv1.RelabelConfig{
 									{
 										TargetLabel: "test",
 									},
@@ -128,13 +144,13 @@ func TestPrometheusAgentSSA(t *testing.T) {
 					},
 				},
 			},
-			Expect: func(t *testing.T, agent *prometheusalpha1.PrometheusAgent) {
-				assert.Equal(t, agent.Spec.ConfigMaps, []string{"cm", config.PrometheusCAConfigMapName})
+			Expect: func(t *testing.T, agent *cooprometheusv1alpha1.PrometheusAgent) {
+				assert.Equal(t, []string{"cm"}, agent.Spec.ConfigMaps)
 				assert.Len(t, agent.Spec.ScrapeClasses, 2)
-				index := slices.IndexFunc(agent.Spec.ScrapeClasses, func(e prometheusv1.ScrapeClass) bool {
+				index := slices.IndexFunc(agent.Spec.ScrapeClasses, func(e cooprometheusv1.ScrapeClass) bool {
 					return e.Name == config.ScrapeClassCfgName
 				})
-				assert.Equal(t, "/var/run/secrets/kubernetes.io/serviceaccount/token", agent.Spec.ScrapeClasses[index].Authorization.CredentialsFile)
+				assert.Empty(t, agent.Spec.ScrapeClasses[index].Authorization)
 				assert.Len(t, agent.Spec.ScrapeClasses[index].MetricRelabelings, 1)
 			},
 		},
@@ -145,7 +161,7 @@ func TestPrometheusAgentSSA(t *testing.T) {
 			builder := resource.PrometheusAgentSSA{
 				ExistingAgent:       tc.ExistingAgent,
 				RemoteWriteEndpoint: "https://example.com/write",
-				PrometheusImage:     "prometheus:latest",
+				KubeRBACProxyImage:  "kube-rbac-proxy:latest",
 				Labels:              tc.Labels,
 			}
 
