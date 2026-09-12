@@ -169,3 +169,13 @@ func GetDefaultVirtualizationConfigData() map[string]string {
 		"placementConfiguration": FormatYAML(placement),
 	}
 }
+
+// GetDefaultWorkloadConfigData returns default config data for workload-pod right-sizing
+func GetDefaultWorkloadConfigData() map[string]string {
+	ruleConfig := GetDefaultRSPrometheusRuleConfig()
+	placement := GetDefaultRSPlacement()
+	return map[string]string{
+		"prometheusRuleConfig":   FormatYAML(ruleConfig),
+		"placementConfiguration": FormatYAML(placement),
+	}
+}

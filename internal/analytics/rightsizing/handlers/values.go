@@ -13,6 +13,7 @@ import (
 type RightSizingValues struct {
 	NamespaceRightSizing      *ComponentValues   `json:"namespaceRightSizing,omitempty"`
 	VirtualizationRightSizing *ComponentValues   `json:"virtRightSizing,omitempty"`
+	WorkloadPodRightSizing    *ComponentValues   `json:"workloadPodRightSizing,omitempty"`
 	ScrapeConfig              *ScrapeConfigValue `json:"scrapeConfig,omitempty"`
 }
 
@@ -38,7 +39,7 @@ type PrometheusRuleValue struct {
 
 // BuildValues builds the helm values from the right-sizing options
 func BuildValues(opts Options) (*RightSizingValues, error) {
-	if !opts.NamespaceRightSizing.Enabled && !opts.VirtualizationRightSizing.Enabled {
+	if !opts.NamespaceRightSizing.Enabled && !opts.VirtualizationRightSizing.Enabled && !opts.WorkloadPodRightSizing.Enabled {
 		return nil, nil
 	}
 
@@ -78,6 +79,23 @@ func BuildValues(opts Options) (*RightSizingValues, error) {
 			})
 		}
 		ret.VirtualizationRightSizing = virtValues
+	}
+
+	if opts.WorkloadPodRightSizing.Enabled {
+		wlValues := &ComponentValues{
+			Enabled: true,
+		}
+		for _, rule := range opts.WorkloadPodRightSizing.PrometheusRules {
+			ruleJSON, err := json.Marshal(rule.Spec)
+			if err != nil {
+				return nil, err
+			}
+			wlValues.Rules = append(wlValues.Rules, PrometheusRuleValue{
+				Name: rule.Name,
+				Data: string(ruleJSON),
+			})
+		}
+		ret.WorkloadPodRightSizing = wlValues
 	}
 
 	if opts.ScrapeConfig != nil {

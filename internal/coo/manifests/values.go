@@ -99,6 +99,10 @@ func BuildValues(opts addon.Options, installCOOIsNeeded bool, isHubCluster bool,
 				rightSizingEnabled = true
 				analyticsDashboards = append(analyticsDashboards, buildVMRSDashboards()...)
 			}
+			if opts.Platform.AnalyticsOptions.RightSizing.WorkloadPodEnabled {
+				rightSizingEnabled = true
+				analyticsDashboards = append(analyticsDashboards, buildWorkloadRSDashboards()...)
+			}
 		}
 	}
 
@@ -290,6 +294,15 @@ func buildVMRSDashboards() []DashboardValue {
 		{rsperses.BuildVMOverview, "VMRightSizingOverview"},
 		{rsperses.BuildVMOverestimation, "VMOverestimation"},
 		{rsperses.BuildVMUnderestimation, "VMUnderestimation"},
+	}
+
+	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)
+}
+
+func buildWorkloadRSDashboards() []DashboardValue {
+	builders := []DashboardBuilder{
+		{rsperses.BuildWorkloadPodRightSizing, "WorkloadPodRightSizing"},
+		{rsperses.BuildWorkloadDetail, "WorkloadDetailRightSizing"},
 	}
 
 	return buildDashboards(builders, dsThanos, config.AnalyticsNamespace)

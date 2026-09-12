@@ -285,6 +285,90 @@ func TestBuildVMUnderestimation_Idempotent(t *testing.T) {
 	assert.Equal(t, string(data1), string(data2))
 }
 
+func TestBuildWorkloadPodRightSizing(t *testing.T) {
+	db, err := BuildWorkloadPodRightSizing(testProject, testDatasource, testClusterLbl)
+	require.NoError(t, err)
+
+	spec := db.Dashboard.Spec
+	assert.Equal(t, "acm-rs-workload-pod-overview", db.Dashboard.Metadata.Name)
+	assert.Equal(t, "ACM Right-Sizing Workloads & Pods", spec.Display.Name)
+
+	t.Run("has expected variables", func(t *testing.T) {
+		varNames := extractVarNames(spec.Variables)
+		assert.Contains(t, varNames, "cluster")
+		assert.Contains(t, varNames, "cpu_profile")
+		assert.Contains(t, varNames, "memory_profile")
+		assert.Contains(t, varNames, "days")
+		assert.Contains(t, varNames, "namespace")
+	})
+
+	t.Run("has expected panel groups", func(t *testing.T) {
+		require.Len(t, spec.Layouts, 2, "CPU section + Memory section")
+		for i, layout := range spec.Layouts {
+			require.Len(t, layout.Spec.Items, 8, "layout %d should have 5 stats + top chart + workload table + pod table", i)
+		}
+	})
+
+	t.Run("panels query workload and pod metrics including limits", func(t *testing.T) {
+		raw, err := json.Marshal(spec)
+		require.NoError(t, err)
+		specStr := string(raw)
+		assert.Contains(t, specStr, "acm_rs:workload:cpu_recommendation")
+		assert.Contains(t, specStr, "acm_rs:workload:cpu_limit")
+		assert.Contains(t, specStr, "acm_rs:workload:memory_limit")
+		assert.Contains(t, specStr, "acm_rs:pod:cpu_limit")
+		assert.Contains(t, specStr, "acm_rs:pod:memory_limit")
+		assert.Contains(t, specStr, "$cpu_profile")
+		assert.Contains(t, specStr, "$memory_profile")
+		assert.NotContains(t, specStr, `profile="$profile"`)
+		assert.Contains(t, specStr, "acm-rs-workload-detail")
+		assert.Contains(t, specStr, "start=$__range", "drill-down links must pass the current time range")
+		assert.Contains(t, specStr, "var-cluster=$cluster", "tables drop the cluster label; links must use the dashboard variable")
+		assert.Contains(t, specStr, `topk(20, sum by (namespace, workload, workload_type)`)
+		assert.NotContains(t, specStr, "topk(20, max_over_time")
+		assert.Contains(t, specStr, "profile=\"$cpu_profile\"")
+		assert.Contains(t, specStr, "profile=\"$memory_profile\"")
+	})
+}
+
+func TestBuildWorkloadDetail(t *testing.T) {
+	db, err := BuildWorkloadDetail(testProject, testDatasource, testClusterLbl)
+	require.NoError(t, err)
+
+	spec := db.Dashboard.Spec
+	assert.Equal(t, "acm-rs-workload-detail", db.Dashboard.Metadata.Name)
+
+	t.Run("has expected variables", func(t *testing.T) {
+		varNames := extractVarNames(spec.Variables)
+		assert.Contains(t, varNames, "cluster")
+		assert.Contains(t, varNames, "cpu_profile")
+		assert.Contains(t, varNames, "memory_profile")
+		assert.Contains(t, varNames, "namespace")
+		assert.Contains(t, varNames, "workload")
+		assert.Contains(t, varNames, "workload_type")
+	})
+
+	t.Run("has expected panel groups", func(t *testing.T) {
+		require.GreaterOrEqual(t, len(spec.Layouts), 7, "back link + CPU stats/chart/pods + Memory stats/chart/pods")
+	})
+
+	t.Run("includes request limit usage recommendation", func(t *testing.T) {
+		raw, err := json.Marshal(spec)
+		require.NoError(t, err)
+		specStr := string(raw)
+		assert.Contains(t, specStr, "acm_rs:workload:cpu_limit")
+		assert.Contains(t, specStr, "acm_rs:workload:memory_limit")
+		assert.Contains(t, specStr, "acm_rs:pod:cpu_limit")
+		assert.Contains(t, specStr, "acm_rs:pod:memory_request")
+		assert.Contains(t, specStr, "$cpu_profile")
+		assert.Contains(t, specStr, "$memory_profile")
+		assert.Contains(t, specStr, "acm-rs-workload-pod-overview")
+		assert.Contains(t, specStr, "start=$__range", "back link must pass the current time range")
+		assert.Contains(t, specStr, `namespace=~"$namespace"`)
+		assert.Contains(t, specStr, `workload=~"$workload"`)
+	})
+}
+
 // --- Cross-Dashboard Consistency ---
 
 func TestAllDashboards_ProjectAndDatasourceThreading(t *testing.T) {
@@ -299,6 +383,8 @@ func TestAllDashboards_ProjectAndDatasourceThreading(t *testing.T) {
 		{"VMOverview", BuildVMOverview},
 		{"VMOverestimation", BuildVMOverestimation},
 		{"VMUnderestimation", BuildVMUnderestimation},
+		{"WorkloadPodRightSizing", BuildWorkloadPodRightSizing},
+		{"WorkloadDetail", BuildWorkloadDetail},
 	}
 
 	for _, b := range builders {
@@ -326,6 +412,8 @@ func TestVMDashboards_DrillDownLinksUseCorrectProject(t *testing.T) {
 		{"VMOverview drill-down to underestimation", BuildVMOverview, "acm-rightsizing-vm-underestimation"},
 		{"VMOverestimation back link", BuildVMOverestimation, "acm-rightsizing-openshift-virtualization"},
 		{"VMUnderestimation back link", BuildVMUnderestimation, "acm-rightsizing-openshift-virtualization"},
+		{"Workload overview drill-down to detail", BuildWorkloadPodRightSizing, "acm-rs-workload-detail"},
+		{"Workload detail back link", BuildWorkloadDetail, "acm-rs-workload-pod-overview"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := tc.fn(customProject, testDatasource, "")

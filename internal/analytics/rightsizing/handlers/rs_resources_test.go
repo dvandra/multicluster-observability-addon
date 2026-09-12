@@ -85,6 +85,9 @@ func TestRSConfigMapPredicate(t *testing.T) {
 	rsVirtCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 		Name: rightsizing.VirtualizationConfigMapName, Namespace: addoncfg.InstallNamespace,
 	}}
+	rsWlCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: rightsizing.WorkloadConfigMapName, Namespace: addoncfg.InstallNamespace,
+	}}
 	unrelatedCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 		Name: "other-config", Namespace: addoncfg.InstallNamespace,
 	}}
@@ -95,6 +98,7 @@ func TestRSConfigMapPredicate(t *testing.T) {
 	// Create: accepts RS ConfigMaps, rejects others
 	assert.True(t, pred.CreateFunc(event.CreateEvent{Object: rsNsCM}))
 	assert.True(t, pred.CreateFunc(event.CreateEvent{Object: rsVirtCM}))
+	assert.True(t, pred.CreateFunc(event.CreateEvent{Object: rsWlCM}))
 	assert.False(t, pred.CreateFunc(event.CreateEvent{Object: unrelatedCM}))
 	assert.False(t, pred.CreateFunc(event.CreateEvent{Object: wrongNsCM}))
 

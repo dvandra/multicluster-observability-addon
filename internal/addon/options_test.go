@@ -256,6 +256,28 @@ func TestBuildOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "workload-pod right-sizing enabled explicitly",
+			addOnDeploy: &addonapiv1beta1.AddOnDeploymentConfig{
+				Spec: addonapiv1beta1.AddOnDeploymentConfigSpec{
+					CustomizedVariables: []addonapiv1beta1.CustomizedVariable{
+						{Name: KeyPlatformNamespaceRightSizing, Value: "disabled"},
+						{Name: KeyPlatformVirtualizationRightSizing, Value: "disabled"},
+						{Name: KeyPlatformWorkloadPodRightSizing, Value: "enabled"},
+					},
+				},
+			},
+			expectedOpts: Options{
+				Platform: PlatformOptions{
+					Enabled: true,
+					AnalyticsOptions: AnalyticsOptions{
+						RightSizing: RightSizingOptions{
+							WorkloadPodEnabled: true,
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "right-sizing disabled explicitly",
 			addOnDeploy: &addonapiv1beta1.AddOnDeploymentConfig{
 				Spec: addonapiv1beta1.AddOnDeploymentConfigSpec{
