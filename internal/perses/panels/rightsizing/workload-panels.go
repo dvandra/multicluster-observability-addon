@@ -174,7 +174,7 @@ func WorkloadMemUtilizationPanel(datasourceName string) panelgroup.Option {
 	})
 }
 
-func timeSeriesPercentChart() timeSeriesPanel.Option {
+func timeSeriesPercentChart() panel.Option {
 	return timeSeriesPanel.Chart(
 		timeSeriesPanel.WithYAxis(timeSeriesPanel.YAxis{
 			Format: &commonSdk.Format{Unit: &dashboards.PercentDecimalUnit, DecimalPlaces: 2},
